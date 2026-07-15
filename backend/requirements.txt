@@ -1,0 +1,126 @@
+# FastAPI and ASGI server
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+gunicorn>=21.2.0
+
+# Database
+motor>=3.3.2
+pymongo>=4.6.0
+beanie>=1.23.3
+
+# Security and middleware
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.6
+slowapi>=0.1.9
+bcrypt>=4.1.2
+PyJWT>=2.8.0
+email-validator>=2.1.0
+pyotp>=2.9.0
+user-agents>=2.2.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+pydantic[email]>=2.5.0
+pydantic-settings>=2.1.0
+
+# Enhanced Security Dependencies - Updated for Python 3.13 compatibility
+numpy>=1.26.0
+# scipy>=1.11.4  # Lazy-loaded on-demand (see utils/lazy_imports.py)
+aiohttp>=3.9.1
+aiofiles>=23.2.1
+xmltodict>=0.13.0
+
+# Security Boundary Dependencies
+# docker>=7.0.0  # Lazy-loaded on-demand for container scanning (see utils/lazy_imports.py)
+psutil>=5.9.6
+deepdiff>=8.6.0
+jsonschema>=4.20.0
+PyYAML>=6.0.1
+
+# HTTP client
+httpx>=0.25.2
+
+# Email services
+aiosmtplib>=3.0.1
+jinja2>=3.1.2
+
+# Git operations
+GitPython>=3.1.40
+
+# AI and Machine Learning
+openai>=1.3.7
+google-generativeai>=0.3.2
+
+# PDF generation
+reportlab>=4.0.7
+
+# ============================================================================
+# Security Scanning Tools - CORE (Always Available)
+# ============================================================================
+bandit>=1.7.5           # Python SAST scanner - FULLY IMPLEMENTED
+safety>=2.3.5           # Python dependency vulnerability scanner - FULLY IMPLEMENTED
+detect-secrets>=1.4.0   # Secrets detection - FULLY IMPLEMENTED
+# semgrep - Installed on-demand to save memory (see utils/lazy_semgrep.py) - FULLY IMPLEMENTED
+
+# ============================================================================
+# Security Scanning Tools - OPTIONAL (Require External Installation)
+# ============================================================================
+# These tools require separate installation and configuration.
+# Set corresponding environment variables to enable:
+#   ENABLE_ZAP=true, ENABLE_NUCLEI=true, ENABLE_CODEQL=true, ENABLE_CHECKOV=true
+#
+# DAST (Dynamic Application Security Testing):
+#   - ZAP: Install OWASP ZAP separately, requires running ZAP daemon
+#   - Nuclei: Install via `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest`
+#
+# SAST (Static Application Security Testing):
+#   - CodeQL: Install GitHub CodeQL CLI from https://github.com/github/codeql-cli-binaries
+#   - Checkov: pip install checkov (heavy dependency, install separately if needed)
+#
+# Note: The platform gracefully degrades when these tools are not available.
+
+# Advanced Scanning Dependencies
+requests>=2.31.0        # HTTP client for API calls
+
+# Additional utilities
+urllib3>=1.26.0         # URL parsing and validation
+colorlog>=6.7.0         # Colored logging for better visibility
+toml>=0.10.2            # For parsing gitleaks.toml config files
+packaging               # For version parsing in safety checks
+
+# Notifications
+slack-sdk>=3.26.1
+
+# Logging and monitoring
+structlog>=23.2.0
+colorama>=0.4.6
+
+# Date/time utilities
+python-dateutil>=2.8.2
+
+# Rate limiting
+limits>=3.7.0
+
+# Security headers
+secure>=0.3.0
+
+# WebSocket support
+websockets>=12.0
+
+# Process management
+psutil>=5.9.6
+
+# Two-Factor Authentication
+pyotp>=2.9.0
+
+# User Agent Parsing
+user-agents>=2.2.0
+
+# ============================================================================
+# Testing Dependencies
+# ============================================================================
+# Run tests with: pytest tests/ -v
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+httpx>=0.25.0  # For async testing
