@@ -2,7 +2,7 @@
  * Admin Route Guard Component
  * Protects admin-only routes by checking user role
  */
-import React from "react";
+import { motion } from "framer-motion";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { ShieldExclamationIcon } from "@heroicons/react/24/outline";
@@ -11,15 +11,20 @@ import { ShieldExclamationIcon } from "@heroicons/react/24/outline";
  * Access Denied Component
  */
 const AccessDenied = () => (
-  <div className="min-h-[60vh] flex items-center justify-center p-8">
+  <motion.div
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    transition={{ duration: 0.3 }}
+    className="min-h-[60vh] flex items-center justify-center p-8"
+  >
     <div className="text-center max-w-md">
       <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-2xl mb-6 border border-red-500/30">
         <ShieldExclamationIcon className="h-10 w-10 text-red-400" />
       </div>
       <h1 className="text-2xl font-bold text-white mb-3">Access Denied</h1>
       <p className="text-gray-400 mb-6">
-        You don't have permission to access this page. This area is restricted
-        to administrators only.
+        You don't have permission to access this page. This area is restricted to administrators
+        only.
       </p>
       <a
         href="/dashboard"
@@ -30,7 +35,7 @@ const AccessDenied = () => (
         Return to Dashboard
       </a>
     </div>
-  </div>
+  </motion.div>
 );
 
 /**
@@ -44,9 +49,14 @@ export const AdminRoute = ({ children }) => {
   // Show loading while auth is being checked
   if (isLoading) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className="min-h-[60vh] flex items-center justify-center"
+      >
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-cyan-500 border-t-transparent" />
-      </div>
+      </motion.div>
     );
   }
 

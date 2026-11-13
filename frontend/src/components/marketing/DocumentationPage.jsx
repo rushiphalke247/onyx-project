@@ -2,6 +2,7 @@
  * Documentation Page - ONYX Security Platform
  * Interactive API documentation and user guides
  */
+import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -166,7 +167,12 @@ console.log('Scan started:', scan.id);`,
       </header>
 
       {/* Hero */}
-      <section className="pt-28 pb-16 border-b border-gray-800/50">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="pt-28 pb-16 border-b border-gray-800/50"
+      >
         <div className="max-w-6xl mx-auto px-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div>
@@ -174,12 +180,10 @@ console.log('Scan started:', scan.id);`,
                 <BookOpenIcon className="w-4 h-4 text-cyan-400" />
                 <span className="text-sm text-cyan-400">Documentation</span>
               </div>
-              <h1 className="text-3xl md:text-4xl font-bold mb-2">
-                ONYX Documentation
-              </h1>
+              <h1 className="text-3xl md:text-4xl font-bold mb-2">ONYX Documentation</h1>
               <p className="text-gray-400 max-w-xl">
-                Everything you need to integrate ONYX into your security
-                workflow. Explore guides, API references, and best practices.
+                Everything you need to integrate ONYX into your security workflow. Explore guides,
+                API references, and best practices.
               </p>
             </div>
             <div className="flex gap-3">
@@ -201,15 +205,31 @@ console.log('Scan started:', scan.id);`,
             </div>
           </div>
         </div>
-      </section>
+      </motion.section>
 
       {/* Categories */}
-      <section className="py-12 border-b border-gray-800/50">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.1 }}
+        className="py-12 border-b border-gray-800/50"
+      >
         <div className="max-w-6xl mx-auto px-6">
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={{
+              visible: { transition: { staggerChildren: 0.08 } },
+            }}
+            className="grid md:grid-cols-2 lg:grid-cols-4 gap-6"
+          >
             {categories.map((cat, i) => (
-              <div
+              <motion.div
                 key={i}
+                variants={{
+                  hidden: { opacity: 0, y: 15 },
+                  visible: { opacity: 1, y: 0 },
+                }}
                 className="p-6 rounded-2xl bg-gray-900/50 border border-gray-800/50 hover:border-gray-700/50 transition-all group cursor-pointer"
               >
                 <cat.icon
@@ -226,19 +246,37 @@ console.log('Scan started:', scan.id);`,
                     </li>
                   ))}
                 </ul>
-              </div>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </div>
-      </section>
+      </motion.section>
 
       {/* Quick Start */}
-      <section className="py-12 border-b border-gray-800/50">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.2 }}
+        className="py-12 border-b border-gray-800/50"
+      >
         <div className="max-w-6xl mx-auto px-6">
           <h2 className="text-2xl font-bold mb-6">Quick Start</h2>
 
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border border-cyan-500/20">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={{
+              visible: { transition: { staggerChildren: 0.1 } },
+            }}
+            className="grid md:grid-cols-3 gap-6"
+          >
+            <motion.div
+              variants={{
+                hidden: { opacity: 0, y: 15 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              className="p-6 rounded-2xl bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border border-cyan-500/20"
+            >
               <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold mb-4">
                 1
               </div>
@@ -252,9 +290,15 @@ console.log('Scan started:', scan.id);`,
               >
                 Sign Up <ArrowRightIcon className="w-3 h-3" />
               </Link>
-            </div>
+            </motion.div>
 
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-violet-500/10 to-violet-500/5 border border-violet-500/20">
+            <motion.div
+              variants={{
+                hidden: { opacity: 0, y: 15 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              className="p-6 rounded-2xl bg-gradient-to-br from-violet-500/10 to-violet-500/5 border border-violet-500/20"
+            >
               <div className="w-10 h-10 rounded-full bg-violet-500/20 flex items-center justify-center text-violet-400 font-bold mb-4">
                 2
               </div>
@@ -265,9 +309,15 @@ console.log('Scan started:', scan.id);`,
               <span className="text-violet-400 text-sm flex items-center gap-1">
                 <KeyIcon className="w-3 h-3" /> Settings → API Keys
               </span>
-            </div>
+            </motion.div>
 
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20">
+            <motion.div
+              variants={{
+                hidden: { opacity: 0, y: 15 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              className="p-6 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20"
+            >
               <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold mb-4">
                 3
               </div>
@@ -278,13 +328,18 @@ console.log('Scan started:', scan.id);`,
               <span className="text-emerald-400 text-sm flex items-center gap-1">
                 <CheckIcon className="w-3 h-3" /> Ready to go!
               </span>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
         </div>
-      </section>
+      </motion.section>
 
       {/* Code Examples */}
-      <section className="py-12 border-b border-gray-800/50">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.3 }}
+        className="py-12 border-b border-gray-800/50"
+      >
         <div className="max-w-6xl mx-auto px-6">
           <h2 className="text-2xl font-bold mb-6">Start a Scan</h2>
 
@@ -306,37 +361,52 @@ console.log('Scan started:', scan.id);`,
               ))}
 
               <button
-                onClick={() =>
-                  copyToClipboard(codeExamples[selectedLang], selectedLang)
-                }
+                onClick={() => copyToClipboard(codeExamples[selectedLang], selectedLang)}
                 className="ml-auto px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-all flex items-center gap-2"
               >
-                {copiedCode === selectedLang ? (
-                  <>
-                    <CheckIcon className="w-4 h-4 text-emerald-400" />
-                    Copied!
-                  </>
-                ) : (
-                  <>
-                    <ClipboardDocumentIcon className="w-4 h-4" />
-                    Copy
-                  </>
-                )}
+                <AnimatePresence mode="wait">
+                  {copiedCode === selectedLang ? (
+                    <motion.span
+                      key="copied"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="flex items-center gap-2"
+                    >
+                      <CheckIcon className="w-4 h-4 text-emerald-400" />
+                      Copied!
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key="copy"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="flex items-center gap-2"
+                    >
+                      <ClipboardDocumentIcon className="w-4 h-4" />
+                      Copy
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </button>
             </div>
 
             {/* Code Block */}
             <pre className="p-6 overflow-x-auto">
-              <code className="text-sm text-gray-300 font-mono">
-                {codeExamples[selectedLang]}
-              </code>
+              <code className="text-sm text-gray-300 font-mono">{codeExamples[selectedLang]}</code>
             </pre>
           </div>
         </div>
-      </section>
+      </motion.section>
 
       {/* API Endpoints */}
-      <section className="py-12 border-b border-gray-800/50">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.4 }}
+        className="py-12 border-b border-gray-800/50"
+      >
         <div className="max-w-6xl mx-auto px-6">
           <h2 className="text-2xl font-bold mb-6">API Endpoints</h2>
 
@@ -344,9 +414,7 @@ console.log('Scan started:', scan.id);`,
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-800/50">
-                  <th className="text-left py-3 px-4 text-gray-400 font-medium text-sm">
-                    Method
-                  </th>
+                  <th className="text-left py-3 px-4 text-gray-400 font-medium text-sm">Method</th>
                   <th className="text-left py-3 px-4 text-gray-400 font-medium text-sm">
                     Endpoint
                   </th>
@@ -355,10 +423,20 @@ console.log('Scan started:', scan.id);`,
                   </th>
                 </tr>
               </thead>
-              <tbody>
+              <motion.tbody
+                initial="hidden"
+                animate="visible"
+                variants={{
+                  visible: { transition: { staggerChildren: 0.05 } },
+                }}
+              >
                 {endpoints.map((ep, i) => (
-                  <tr
+                  <motion.tr
                     key={i}
+                    variants={{
+                      hidden: { opacity: 0, x: -10 },
+                      visible: { opacity: 1, x: 0 },
+                    }}
                     className="border-b border-gray-800/30 last:border-0 hover:bg-gray-800/30 transition-colors cursor-pointer"
                   >
                     <td className="py-3 px-4">
@@ -370,29 +448,29 @@ console.log('Scan started:', scan.id);`,
                         {ep.method}
                       </span>
                     </td>
-                    <td className="py-3 px-4 font-mono text-sm text-gray-300">
-                      {ep.path}
-                    </td>
+                    <td className="py-3 px-4 font-mono text-sm text-gray-300">{ep.path}</td>
                     <td className="py-3 px-4 text-gray-400 text-sm hidden md:table-cell">
                       {ep.desc}
                     </td>
-                  </tr>
+                  </motion.tr>
                 ))}
-              </tbody>
+              </motion.tbody>
             </table>
           </div>
 
           <p className="mt-4 text-gray-500 text-sm">
-            Base URL:{" "}
-            <code className="text-gray-400">
-              https://api.onyx-security.io/v1
-            </code>
+            Base URL: <code className="text-gray-400">https://api.onyx-security.io/v1</code>
           </p>
         </div>
-      </section>
+      </motion.section>
 
       {/* Help */}
-      <section className="py-12">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.5 }}
+        className="py-12"
+      >
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2 className="text-2xl font-bold mb-4">Need Help?</h2>
           <p className="text-gray-400 mb-6">
@@ -415,10 +493,15 @@ console.log('Scan started:', scan.id);`,
             </a>
           </div>
         </div>
-      </section>
+      </motion.section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-800/50 py-8">
+      <motion.footer
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4, delay: 0.6 }}
+        className="border-t border-gray-800/50 py-8"
+      >
         <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-gray-500 text-sm">
             © {new Date().getFullYear()} ONYX Security Intelligence
@@ -427,21 +510,15 @@ console.log('Scan started:', scan.id);`,
             <Link to="/docs" className="text-cyan-400">
               Documentation
             </Link>
-            <Link
-              to="/terms"
-              className="text-gray-500 hover:text-gray-300 transition-colors"
-            >
+            <Link to="/terms" className="text-gray-500 hover:text-gray-300 transition-colors">
               Terms
             </Link>
-            <Link
-              to="/legal"
-              className="text-gray-500 hover:text-gray-300 transition-colors"
-            >
+            <Link to="/legal" className="text-gray-500 hover:text-gray-300 transition-colors">
               Data Policy
             </Link>
           </div>
         </div>
-      </footer>
+      </motion.footer>
     </div>
   );
 };

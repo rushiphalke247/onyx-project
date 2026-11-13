@@ -1,24 +1,26 @@
 """
 Email Service for ONYX Security Intelligence Platform
-Handles email sending with support for multiple providers:
-- SMTP (Gmail, Outlook, Yahoo, SendGrid)
-- Brevo API (HTTP-based, works on Render/cloud platforms, no domain verification needed)
-Refactored for modularity and maintainability
+Handles email sending via SMTP with deliverability best practices:
+- Proper email headers (Message-ID, Date, List-Unsubscribe)
+- Multipart alternative (HTML + plain text)
+- DKIM/SPF aligned From address
+- Secure TLS connections
 """
-import asyncio
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
-from typing import List, Optional, Dict, Any
+import re
 import ssl
-import aiosmtplib
-import httpx
 from datetime import datetime
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import formataddr, formatdate, make_msgid
+from typing import Any, Dict, List, Optional
+
+import aiosmtplib
 
 from config import settings
+
 from .templates import get_jinja_environment
 from .templates.base_template import SEVERITY_COLORS
 
@@ -26,13 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """Production-ready email service with SMTP and Brevo API support"""
+    """Production-ready email service using SMTP with anti-spam best practices"""
     
     def __init__(self):
         """Initialize email service with configured templates"""
         self.jinja_env = get_jinja_environment()
-        self.use_brevo = False
-        self.brevo_api_key = None
         self._configure_provider()
     
     def _configure_provider(self):
@@ -41,19 +41,6 @@ class EmailService:
             logger.info("Email service disabled")
             return
         
-        # Check if Brevo is configured (preferred for cloud platforms like Render)
-        # Brevo: 300 emails/day free, no domain verification required
-        if settings.brevo_api_key or (settings.email_provider and settings.email_provider.lower() == 'brevo'):
-            self.use_brevo = True
-            self.brevo_api_key = settings.brevo_api_key
-            self.email_from = settings.email_from
-            self.email_from_name = settings.email_from_name
-            if not self.email_from:
-                logger.error("EMAIL_FROM is required for Brevo")
-            else:
-                logger.info("✅ Configured email with Brevo API (HTTP-based, no domain verification)")
-            return
-            
         # Provider-specific SMTP configurations
         if settings.email_provider:
             provider_configs = {
@@ -140,21 +127,32 @@ class EmailService:
             return True
         
         try:
-            # Use Brevo API if configured (works on Render/cloud platforms)
-            if self.use_brevo:
-                return await self._send_brevo_email(to_email, subject, html_body, text_body)
+            # Strip HTML for plain text version if not provided
+            if not text_body:
+                text_body = re.sub(r'<[^>]+>', '', html_body)
+                text_body = re.sub(r'\s+', ' ', text_body).strip()
+                if not text_body:
+                    text_body = subject
             
-            # Otherwise use SMTP
-            # Create message
+            # Build message with proper headers for deliverability
             message = MIMEMultipart('alternative')
             message['Subject'] = subject
-            message['From'] = f"{self.email_from_name} <{self.email_from}>"
+            message['From'] = formataddr((self.email_from_name, self.email_from))
             message['To'] = to_email
+            message['Message-ID'] = make_msgid(domain=self.email_from.split('@')[-1] if '@' in self.email_from else 'onyx.local')
+            message['Date'] = formatdate(localtime=True)
+            message['Precedence'] = 'bulk'
+            message['X-Mailer'] = 'ONYX'
+            message['Auto-Submitted'] = 'auto-generated'
+            
+            # List-Unsubscribe helps with Gmail spam classification
+            unsubscribe_url = f"{settings.frontend_url}/profile?tab=notifications"
+            message['List-Unsubscribe'] = f'<{unsubscribe_url}>'
+            message['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
             
             # Add text and HTML parts
-            if text_body:
-                text_part = MIMEText(text_body, 'plain', 'utf-8')
-                message.attach(text_part)
+            text_part = MIMEText(text_body, 'plain', 'utf-8')
+            message.attach(text_part)
             
             html_part = MIMEText(html_body, 'html', 'utf-8')
             message.attach(html_part)
@@ -174,66 +172,12 @@ class EmailService:
             logger.error(f"❌ Failed to send email to {to_email}: {str(e)}")
             return False
     
-    async def _send_brevo_email(
-        self,
-        to_email: str,
-        subject: str,
-        html_body: str,
-        text_body: Optional[str] = None
-    ) -> bool:
-        """Send email via Brevo API (HTTP-based, works on cloud platforms, no domain verification)"""
-        try:
-            # Brevo requires textContent to not be empty - generate from HTML if not provided
-            if not text_body:
-                # Simple HTML to text conversion - strip tags
-                import re
-                text_body = re.sub(r'<[^>]+>', '', html_body)
-                text_body = re.sub(r'\s+', ' ', text_body).strip()
-                # Ensure it's not empty
-                if not text_body:
-                    text_body = subject
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "https://api.brevo.com/v3/smtp/email",
-                    headers={
-                        "api-key": self.brevo_api_key,
-                        "Content-Type": "application/json",
-                        "Accept": "application/json"
-                    },
-                    json={
-                        "sender": {
-                            "name": self.email_from_name,
-                            "email": self.email_from
-                        },
-                        "to": [{"email": to_email}],
-                        "subject": subject,
-                        "htmlContent": html_body,
-                        "textContent": text_body
-                    },
-                    timeout=30.0
-                )
-                
-                if response.status_code in [200, 201]:
-                    logger.info(f"✅ Email sent via Brevo to: {to_email}")
-                    return True
-                else:
-                    logger.error(f"❌ Brevo API error: {response.status_code} - {response.text}")
-                    return False
-                    
-        except Exception as e:
-            logger.error(f"❌ Brevo email error: {str(e)}")
-            return False
-    
     async def _send_smtp_email(self, message: MIMEMultipart, to_email: str):
-        """Send email via SMTP"""
+        """Send email via SMTP with secure TLS connection"""
         try:
-            # Use SSL context for security
             context = ssl.create_default_context()
             
-            # Configure SMTP client based on settings
             if self.smtp_use_ssl:
-                # Direct SSL connection (port 465)
                 smtp_client = aiosmtplib.SMTP(
                     hostname=self.smtp_server,
                     port=self.smtp_port,
@@ -241,7 +185,6 @@ class EmailService:
                     tls_context=context
                 )
             else:
-                # Regular connection with STARTTLS (port 587)
                 smtp_client = aiosmtplib.SMTP(
                     hostname=self.smtp_server,
                     port=self.smtp_port,
@@ -251,6 +194,9 @@ class EmailService:
                 )
             
             await smtp_client.connect()
+            
+            # Say HELO/EHLO explicitly for better deliverability
+            await smtp_client.ehlo()
             
             if self.smtp_username and self.smtp_password:
                 await smtp_client.login(self.smtp_username, self.smtp_password)
@@ -267,8 +213,6 @@ class EmailService:
         try:
             filename = attachment.get('filename', 'attachment')
             content = attachment.get('content', b'')
-            content_type = attachment.get('content_type', 'application/octet-stream')
-            
             part = MIMEBase('application', 'octet-stream')
             part.set_payload(content)
             encoders.encode_base64(part)
@@ -289,7 +233,7 @@ class EmailService:
             template = self.jinja_env.get_template('verification')
             html_body = template.render(
                 verification_url=verification_url,
-                platform_name="ONYX Platform"
+                platform_name="ONYX"
             )
             
             return await self.send_email(
@@ -310,7 +254,7 @@ class EmailService:
             template = self.jinja_env.get_template('password_reset')
             html_body = template.render(
                 reset_url=reset_url,
-                platform_name="ONYX Platform"
+                platform_name="ONYX"
             )
             
             return await self.send_email(
@@ -332,7 +276,7 @@ class EmailService:
             html_body = template.render(
                 user_name=user_name,
                 dashboard_url=dashboard_url,
-                platform_name="ONYX Platform"
+                platform_name="ONYX"
             )
             
             return await self.send_email(
@@ -356,13 +300,69 @@ class EmailService:
         low_count: int = 0,
         duration: str = "N/A",
         files_scanned: int = 0,
-        report_id: str = None
+        report_id: str = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        detailed_findings: Optional[List[Dict[str, Any]]] = None
     ) -> bool:
-        """Send scan completion notification email"""
+        """Send scan completion notification email with optional report attachment"""
         try:
             report_url = f"{settings.frontend_url}/report/{report_id}" if report_id else f"{settings.frontend_url}/dashboard"
+            total_findings = critical_count + high_count + medium_count + low_count
             
-            template = self.jinja_env.get_template('scan_completed')
+            # Calculate risk score (0-100, higher = more secure)
+            risk_score = max(0, 100 - (critical_count * 25 + high_count * 15 + medium_count * 5 + low_count * 1))
+            
+            # Determine score styling based on risk level
+            if risk_score >= 80:
+                score_bg_start = "rgba(34, 197, 94, 0.15)"
+                score_bg_end = "rgba(16, 185, 129, 0.15)"
+                score_border = "rgba(34, 197, 94, 0.3)"
+                score_color = "#4ade80"
+                score_label_color = "#86efac"
+            elif risk_score >= 60:
+                score_bg_start = "rgba(234, 179, 8, 0.15)"
+                score_bg_end = "rgba(245, 158, 11, 0.15)"
+                score_border = "rgba(234, 179, 8, 0.3)"
+                score_color = "#fbbf24"
+                score_label_color = "#fcd34d"
+            else:
+                score_bg_start = "rgba(239, 68, 68, 0.15)"
+                score_bg_end = "rgba(220, 38, 38, 0.15)"
+                score_border = "rgba(239, 68, 68, 0.3)"
+                score_color = "#f87171"
+                score_label_color = "#fca5a5"
+            
+            # Generate top findings HTML from detailed_findings
+            top_findings_html = ""
+            if detailed_findings:
+                sev_colors = {"critical": "#ef4444", "high": "#f97316", "medium": "#eab308", "low": "#22c55e", "info": "#3b82f6"}
+                # Show top 5 critical/high findings
+                priority_findings = sorted(
+                    detailed_findings,
+                    key=lambda f: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
+                        f.get("severity", "info").lower(), 5
+                    )
+                )[:5]
+                
+                for f in priority_findings:
+                    sev = f.get("severity", "medium").lower()
+                    sc = sev_colors.get(sev, "#94a3b8")
+                    title = f.get("title", "Unknown Finding")[:80]
+                    desc = f.get("description", "")[:150]
+                    file_path = f.get("file_path", "")
+                    
+                    top_findings_html += f'''
+                    <div style="padding: 14px 16px; margin-bottom: 10px; background: rgba(255,255,255,0.03); border-radius: 12px; border-left: 4px solid {sc};">
+                        <div style="margin-bottom: 6px;">
+                            <span style="color: #e2e8f0; font-size: 14px; font-weight: 600;">{title}</span>
+                            <span style="background: {sc}; color: white; padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: 8px; display: inline-block;">{sev.upper()}</span>
+                        </div>
+                        {"<p style='color: #94a3b8; font-size: 12px; margin: 0 0 4px 0; line-height: 1.4;'>" + desc + "</p>" if desc else ""}
+                        {"<p style='color: #64748b; font-size: 11px; margin: 0; font-family: monospace;'>" + file_path + "</p>" if file_path else ""}
+                    </div>'''
+            
+            # Use the premium scan report email template
+            template = self.jinja_env.get_template('scan_report_email')
             html_body = template.render(
                 project_name=project_name,
                 scan_type=scan_type,
@@ -370,10 +370,19 @@ class EmailService:
                 high_count=high_count,
                 medium_count=medium_count,
                 low_count=low_count,
+                total_findings=total_findings,
                 duration=duration,
-                files_scanned=files_scanned,
+                risk_score=risk_score,
+                score_bg_start=score_bg_start,
+                score_bg_end=score_bg_end,
+                score_border=score_border,
+                score_color=score_color,
+                score_label_color=score_label_color,
                 completed_at=datetime.now().strftime("%B %d, %Y at %I:%M %p"),
-                report_url=report_url
+                report_url=report_url,
+                top_findings_html=top_findings_html,
+                has_critical=critical_count > 0,
+                has_attachment=attachments is not None and len(attachments) > 0
             )
             
             # Determine urgency based on findings
@@ -381,13 +390,16 @@ class EmailService:
                 subject = f"🚨 CRITICAL: Scan Complete - {critical_count} critical issues in {project_name}"
             elif high_count > 0:
                 subject = f"⚠️ Scan Complete - {high_count} high severity issues in {project_name}"
+            elif total_findings > 0:
+                subject = f"✅ Scan Complete - {total_findings} findings in {project_name}"
             else:
-                subject = f"✅ Scan Complete - {project_name}"
+                subject = f"🎉 Scan Complete - No issues found in {project_name}"
             
             return await self.send_email(
                 to_email=email,
                 subject=subject,
-                html_body=html_body
+                html_body=html_body,
+                attachments=attachments
             )
             
         except Exception as e:
@@ -596,7 +608,7 @@ class EmailService:
                 enabled_at=enabled_at,
                 device_info=device_info or "Unknown Device",
                 security_settings_url=security_url,
-                platform_name="ONYX Platform"
+                platform_name="ONYX"
             )
             
             return await self.send_email(
@@ -622,7 +634,7 @@ class EmailService:
                 ip_address=ip_address or "Unknown",
                 enable_2fa_url=enable_2fa_url,
                 secure_account_url=security_url,
-                platform_name="ONYX Platform"
+                platform_name="ONYX"
             )
             
             return await self.send_email(
@@ -647,7 +659,7 @@ class EmailService:
                 ip_address=ip_address or "Unknown",
                 remaining_codes=remaining_codes,
                 security_url=security_url,
-                platform_name="ONYX Platform"
+                platform_name="ONYX"
             )
             
             return await self.send_email(
@@ -672,7 +684,7 @@ class EmailService:
                 ip_address=ip_address or "Unknown",
                 device=device or "Unknown",
                 secure_account_url=security_url,
-                platform_name="ONYX Platform"
+                platform_name="ONYX"
             )
             
             return await self.send_email(

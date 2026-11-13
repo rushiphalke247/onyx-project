@@ -1,0 +1,98 @@
+# Fix-PR State Persistence (Re-hydration) — Gates & Live QA
+
+Date: 2026-10-19/20 — branch: master — commits: d7fd218 (spec) ce3a0df 2c49c2c 90f73ff 78dcc5a 8eac328 5406af5 e60489f (Tasks 1–7) df83e02 138f756 (Task 8a) d6b0058 (gates record) 869cec6 (in-flight gating + DELETE authz test) 911c636 (security review record)
+
+Spec: `docs/superpowers/specs/2026-10-19-fix-pr-rehydration-design.md`. Plan: `docs/superpowers/plans/2026-10-19-fix-pr-rehydration.md`. Track closes the "fix state is lost on reload; reject disappears on refresh" limitations of the fix-PR UX track: persisted pending proposals + fix outcomes are now hydrated from `ScanReport.metadata`, and reject/discard is server-persisted.
+
+## Automated gates
+
+| Gate | Command | Expected | Actual | Status |
+|---|---|---|---|---|
+| Backend unit | `backend\.venv\Scripts\python.exe -m pytest` | 751 passed (Tasks 1–7) + 7 new (Task 8a) = 758 | **758 passed** in 55.82s; **759 passed** after security follow-ups (+1) | ok |
+| Frontend unit | `npx vitest run` | 405/405 (58 files) | 405/405 (58 files); **406/406** after security follow-ups (+1) | ok |
+| Frontend lint | `npm run lint` | 0 err / 10 warn | 0 err / 10 warn | ok |
+| Frontend build | `npm run build` | exit 0 | exit 0 | ok |
+| Prettier | `npx prettier --check` on the seven touched frontend files (`FixReviewSection.jsx`, `FixReviewSection.test.jsx`, `useFixRun.js`, `useFixRun.test.jsx`, `FindingDetail.test.jsx`, `aiClient.js`, `aiClient.test.js`) | clean | "All matched files use Prettier code style!" | ok |
+
+Suite growth: backend 734 → 751 (+17 across Tasks 1–4: `tests/test_fix_runner.py` 24, `tests/test_auto_fix_routes.py` 17), then 758 in Task 8a (+7: 4 implementer + 3 controller amendment → `test_fix_runner.py` 31), then **759** in the security follow-up (+1 → `test_auto_fix_routes.py` 18). Frontend 396 → 405 (+9: `aiClient.test.js` 21, `useFixRun.test.jsx` 16, `FixReviewSection.test.jsx` 13, `FindingDetail.test.jsx` 9), then **406** in the security follow-up (+1 → `FixReviewSection.test.jsx` 14).
+
+### TDD evidence
+
+- Per-task RED→GREEN records live in `.superpowers/sdd/fix-pr-task-{1..8}-report.md` (untracked) and the ledger. Disclosed quirks: Task 3's RED phase had 2/6 route tests passing coincidentally (404s before the route existed) and Task 4 repeated that pattern; Task 2's RED error text was `ImportError` rather than the brief's `AttributeError` (report-only inconsistency). All tasks landed green on the named suites.
+- Task 8a RED: `4 failed, 24 passed` (28 collected) — the 3 new tests plus the updated `test_open_pr_records_verification_and_status` failed for the expected reason (`get_fix_state` returned `none`; `KeyError: 'fix_status'` in outcome tests); the guard test was green pre-fix by design.
+
+## Implementation summary
+
+- `GET /api/reports/{scan_id}/auto-fix/{finding_id}` → `FixStateResponse` (`status` = `none | awaiting_approval | pr_created | verified`; awaiting → `diff/file_path/model_used/created_at`; outcome → `pr_url`; **never** `patched_content`/`base_sha`). Outcome wins over a still-present pending key; absent returns `"none"` (200).
+- `DELETE /api/reports/{scan_id}/auto-fix/{finding_id}` → `{"status":"discarded"}`, idempotent (re-pending a fix is only possible via a later explicit propose).
+- Service layer: `get_fix_state` (safe subset) and `discard_pending` in `services/ai/fix_runner.py`; Task 8a added `_entry_matches_finding` (id-or-rule_id + path disambiguation) so outcome records match **real** `metadata.findings` entries (raw scanner dicts carry `rule_id`/`file_path`, not `id`).
+- Auth: both routes resolve the report through the shared `_report_or_404` access check (same as propose/approve) → 404 for unknown or foreign scans, 401 unauthenticated.
+- Frontend: `autoFixGetState`/`autoFixDiscard` in `aiClient.js`; `useFixRun` hydrates persisted state (`gcTime` 30 min, `staleTime` Infinity, `retry: false`, `refetchInterval`/`refetchOnReconnect` disabled, fail-soft to `EMPTY`) and the reject action now calls `autoFixDiscard` (server-side discard) with optimistic UI; `FixReviewSection`/`FixTriggerCard`/`VerifiedBadge` render all four hydrated states; `FindingDetail` shows the section directly on deep-link/reload.
+
+## Live QA walkthrough (2026-10-19/20 — Playwright MCP against uvicorn :8000 + Vite :5173)
+
+Environment: backend restarted mid-QA to load Task 8a (`df83e02`; uvicorn runs without `--reload`). Account: `qa.live@example.com` (password reset via temp script `$TEMP\opencode\onyx-qa-live-reset.py` — **user action: rotate the QA passwords**; literals exist only in local history, nothing pushed). Target: report `qa-live-check-001`, finding `qa-f-001` (`app/repository.py`), state driven by temp seed script `$TEMP\opencode\onyx-qa-fix-seed.py` writing the **real raw entry shape** (`rule_id`/`file_path`).
+
+Scenarios, all PASS:
+
+- [x] **Deep-link hydration (pending)** — full page load (F5-equivalent) of the finding URL renders the Fix-PR card "Awaiting approval" + the "Fix-PR review" section with diff table, "Approve & open PR"/"Reject", and "🤖 Fix by qa/seed" — nothing was clicked first. Screenshot: `.playwright-mcp/qa-fix-pending.png` (untracked).
+- [x] **Owner API read** — `GET …/auto-fix/qa-f-001` → 200 `awaiting_approval` with `file_path`, `model_used`, `created_at`, `diff`; raw response contains **no** `patched_content`, `base_sha`, or seeded patch text (safe-subset proof).
+- [x] **Cross-user access (live IDOR check)** — the same GET as `qa.admin@example.com` (different user) → **404** "Scan report not found or access denied".
+- [x] **Reject persists** — Reject → in-app dialog ("Reject this proposal? …") → "Reject proposal" → section disappears, card back to idle; server `GET` → `none`; **reload stays idle**; a second `DELETE` → 200 `{"status":"discarded"}` (idempotent).
+- [x] **PR outcome hydration (real raw shape)** — seed entry `{rule_id: "qa-f-001", file_path: "app/repository.py", fix_pr_url: …, fix_status: "pr_created"}` → API `GET` → 200 `pr_created` + PR URL, no sensitive fields; browser reload renders "PR opened" badge, lifecycle stepper, and link "PR #open" → `https://github.com/example/repo/pull/999`.
+- [x] **Clear → idle** — seed cleared → API `GET` → `none` → browser reload renders the idle Fix-PR card (no review section, no badges).
+- [x] **Pre-fix boundary witness (why 8a exists)** — with the original id-only matcher, the raw-shape PR entry returned `none` and the browser stayed idle after reload; after `df83e02` + backend restart the same scenario hydrates. This is the live reproduction of the defect below.
+
+### QA method notes
+
+- QA user password was reset through a temp script (user DB record only) because the prior QA track's rotation left the literal unknown; rotate both QA passwords afterwards (carried action).
+- Access tokens expired mid-session (re-login) — normal session TTL, not track-related.
+- `vite --force` printed a dependency-resolution error for `@emotion/is-prop-valid` (imported by files under `frontend/storybook-static/`): dev-server dep-scan noise from the built Storybook output; the app served fine and all scenarios passed. Pre-existing, unrelated to this track.
+- Playwright MCP wrote snapshots/logs to `.playwright-mcp/` (untracked tooling output, outside committed scope).
+
+## Defect found by this QA and fixed in-track (Task 8a)
+
+- **Symptom:** `pr_created`/`verified` outcomes never re-hydrated on real scans (fresh reload showed idle); `awaiting_approval` worked.
+- **Root cause:** `process_real_scan` writes `metadata.findings` as raw scanner dicts (`routes/webhook/scan_operations.py:406,499`); those entries carry `rule_id`/`file_path` and **never `id`** (DB probe: 0/87 entries across 8 real reports). `VulnerabilityFinding.id` is assigned the raw `rule_id` (`scan_operations.py:354`). `_record_fix_outcome` (introduced 96055e3a) and the new `get_fix_state` matched `entry["id"]` only → write-side no-op and read-side miss on real data. Unit fixtures had fabricated `{"id": …}` entries, masking it.
+- **Fix (`df83e02`):** `_entry_matches_finding` = match on `entry["id"] or entry["rule_id"]` with `file_path` preference (reusing `_path_matches`) when both sides have a path; applied in `_record_fix_outcome` (`fix_runner.py:138`). `get_fix_state` matches `entry["id"] or entry["rule_id"] == finding_id` inline (`fix_runner.py:160`) with no read-side path disambiguation (open follow-up from final review). Fixtures now mirror the production raw shape; +4 tests.
+- **Controller amendment (`138f756`):** +3 tests pinning the production invariant (`id == rule_id`), legacy `id` write-side back-compat, and the entry-lacks-path fallback.
+- **Review verdict:** APPROVE WITH CONCERNS (independent reviewer; no critical/major findings in the change). Resolved before QA: the seed script's id-only join (temp-file fix) and the stale gate counts in the Task 8 brief (751/24 → 758/31).
+
+## Risks / notes / follow-up debt
+
+- **Duplicate `rule_id` is not a unique finding id (pre-existing):** `_find_finding` and `get_fix_state` return the first occurrence, so on real scans only the first finding with a given rule is addressable end-to-end; `_record_fix_outcome` updates every matching entry, with the path check disambiguating across files when paths are present. Longer-term fix: composite finding ids or a path-aware state endpoint.
+- **"PR #open" copy:** hydrated outcome state has no `pr_number` (safe subset), so `FixReviewSection.jsx:54` (`PR #{pr_number ?? "open"}`) renders "PR #open". Cosmetic follow-up (e.g., render "View PR" when the number is unknown).
+- **Fail-soft trade-offs (spec-mandated):** a failed hydration GET caches `EMPTY` for up to 30 min; the hook's broad try/catch also covers the mapper (mapper bugs surface as "empty" rather than errors).
+- **Minor test gaps (accepted):** route-level outcome test still uses the legacy `id`-shaped entry (thin wrapper, service test covers raw shape); `entry.get("id") or entry.get("rule_id")` lets a truthy stale `id` shadow `rule_id` on hypothetical mixed-shape entries (no such data exists today).
+- **Concurrency:** outcome writes are read-modify-write over the whole report (same pre-existing pattern as `approve_fix`); concurrent finishing fixes on one report can lose one outcome. Not exercised in QA; candidate for an atomic `$set` follow-up.
+- **Carried from the ML track:** `backend/.dockerignore` still does not exclude `.env` — do not publish images built from a working tree with a real `.env` until fixed.
+- **Pending user actions:** rotate QA passwords (`qa.admin@example.com`, `qa.live@example.com`); history purge (if ever wanted) requires explicit approval — nothing has been pushed (`origin/master` is still `bbaaba1`).
+
+## Security review + follow-ups (2026-10-20)
+
+A `security` subagent review over the track diff `d7fd218..HEAD` returned **ACCEPTABLE WITH CONCERNS** — no Critical or High findings. Verified clean: authorization parity across propose/approve/GET/DELETE (`_report_or_404`; 404 for foreign scans, no existence oracle; live IDOR check recorded above), the GET/DELETE safe-subset guarantee end-to-end for the new endpoints (service allowlist + Pydantic model + frontend whitelist; no error path echoes metadata), Task 8a as pure string matching with no content execution, DELETE semantics limited to `metadata.pending_fixes[finding_id]`, input handling (no NoSQL/regex/path injection; Bearer-header auth so no CSRF), frontend safety (`rel="noopener noreferrer"`, text-only diff rendering), and secret hygiene in the committed range.
+
+Findings and dispositions:
+
+1. **[Low, pre-existing] Raw report metadata side channel:** `GET /api/reports/{id}` (`routes/reports/detail.py:101`) and the JSON export (`routes/reports/export.py:83`) return `report.metadata` verbatim, including `pending_fixes[*].patched_content`/`base_sha` — so an authorized report viewer (owner/project member, same boundary as before this track) can read the full patch before approval, contradicting the spec's "stays server-side until approve" promise in the broader API. The new GET does not add this exposure. **Accepted as follow-up debt (out of track scope):** next track should strip `pending_fixes` (or at least `patched_content`/`base_sha`) from the detail/export metadata projection and add a regression test.
+2. **[Low] Duplicate `rule_id` ≠ unique finding id:** misattribution risk (only the first occurrence is addressable; state can show a sibling file's PR). Pre-existing; already documented under Risks above. Follow-up: composite/path-aware finding ids or a path-aware state endpoint.
+3. **[Low] Reject vs in-flight approve race:** DELETE could return "discarded"/"nothing was applied" while an already-running approve still opens the PR (approve's claim is in-memory until `_open_pr` completes). **UI part fixed in `869cec6`:** both "Approve & open PR" and "Reject" are now disabled while `isApproving` (this also closes the earlier double-submit nit), pinned by a new `FixReviewSection.test.jsx` test (13 → 14). Backend part (atomic approval claim / conflict response, gating Reject in other tabs) recorded as follow-up debt.
+4. **[Low] Whole-document `save()` in DELETE can lose concurrent updates** (same read-modify-write pattern as outcome writes, now with a fast new writer). Accepted debt: follow-up should use atomic `find_one_and_update` with `$set`/`$unset` on `metadata.pending_fixes.<finding_id>` plus a concurrency test.
+5. **[Info] Report-level authorization only** — any user with report access can read/discard another member's pending proposal; no audit log or rate limit on the new routes. Consistent with the existing propose/approve model; optional hardening if project membership is lower-trust.
+
+Verification gap closed in the follow-up commit: `test_discard_access_denied_for_foreign_scan` (mirrors the GET variant; asserts 404, pending untouched, no save) — `test_auto_fix_routes.py` 17 → 18.
+
+Post-follow-up gates: backend **759 passed**; frontend **406 passed** (58 files); lint 0 err / 10 warn; build exit 0. Follow-up commits: `869cec6` (fix) + `911c636` (security-review doc update).
+
+## Final whole-branch review (2026-10-20)
+
+Independent `reviewer` pass over `d7fd218..911c636` (package: `.superpowers/sdd/fix-pr-final-review-package.txt`). Verdict: **APPROVE WITH CONCERNS — no blocking findings.** Fresh re-runs at HEAD: backend `759 passed in 82.59s`; frontend `406 passed (58 files)`; focused backend 49 passed (`test_fix_runner.py` 31 + `test_auto_fix_routes.py` 18); focused frontend 30 passed; lint 0 err / 10 warn; build exit 0; `git diff --check` clean. Confirmed: no propose/approve regression from the Task 8a join change (df83e02 touches only the outcome match + its tests; the match is a refinement/superset of the old id-only match), and no happy-path UX regression from `869cec6` (gating is inert while `isApproving` is false; the new test exercises the full approve happy path). The five doc inaccuracies this review found were corrected in this same commit.
+
+Final-review findings (all Low/Info, non-blocking; carried as follow-up debt):
+
+1. **[Low] Read/write join asymmetry:** `get_fix_state` matches inline without path disambiguation (`fix_runner.py:158-168`, match `:160`) while `_entry_matches_finding` is write-side only (`:138`). With duplicate `rule_id` across files, hydration can surface a sibling entry's outcome. Fix: pass the resolved finding/`file_path` into `get_fix_state` and reuse the helper.
+2. **[Low] Outcome priority masks a newer pending:** after re-propose following a completed fix, `get_fix_state` returns the older outcome (outcome-wins is spec-mandated for stale pendings) and the new pending is invisible after reload, though it exists server-side. Fix: clear/replace the outcome on re-propose, or surface pending-when-newer.
+3. **[Low] In-flight approval UX gaps:** no progress indicator while approve can pend up to `APPROVE_TIMEOUT_MS = 600_000` (`aiClient.js:139`), and "Propose again" stays enabled while `isApproving`. Additive polish, not a regression.
+4. **[Low] Join relies on the `finding.id == rule_id` invariant** (`fix_runner.py:79-80`; holds per `scan_operations.py:353-356`, pinned by `138f756`). Legacy parser paths (`utils/result_parser.py:319,409,813` synthetic ids) would silently fail the join if ever wired into `metadata.findings`. Guard at write time or pin with a fixture.
+5. **[Low, accepted debt] Whole-report read-modify-write** (`fix_runner.py:146-148`, `:189-196`) — see Concurrency above.
+6. **[Info] Gates-doc accuracy** — corrected in this commit (commit list, Prettier file count, Task 8a RED counts, `useFixRun` query options, helper-application wording).

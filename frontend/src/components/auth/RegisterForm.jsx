@@ -2,25 +2,24 @@
  * Enhanced Register Form Component
  * Modern UI with real-time password validation
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import {
   EyeIcon,
   EyeSlashIcon,
-  ArrowPathIcon,
   ArrowRightIcon,
   CheckCircleIcon,
   SparklesIcon,
   LockClosedIcon,
+  UserIcon,
+  EnvelopeIcon,
+  AtSymbolIcon,
 } from "@heroicons/react/24/outline";
-import { UserCircleIcon as UserCircleSolid } from "@heroicons/react/24/solid";
+import { Button, Input } from "../ui/StyleComponents";
 import { useAuth } from "./AuthContext";
 import toast from "react-hot-toast";
 
-export const RegisterForm = ({
-  onSuccess,
-  onSwitchToLogin,
-  onRegistrationSuccess,
-}) => {
+export const RegisterForm = ({ onSuccess: _onSuccess, onSwitchToLogin, onRegistrationSuccess }) => {
   const [formData, setFormData] = useState({
     email: "",
     username: "",
@@ -61,8 +60,7 @@ export const RegisterForm = ({
       return;
     }
 
-    const allValidationsPassed =
-      Object.values(passwordValidation).every(Boolean);
+    const allValidationsPassed = Object.values(passwordValidation).every(Boolean);
     if (!allValidationsPassed) {
       toast.error("Please ensure your password meets all requirements");
       return;
@@ -87,37 +85,64 @@ export const RegisterForm = ({
   };
 
   return (
-    <div className="p-6 md:p-8 max-h-[85vh] overflow-y-auto">
-      {/* Compact Header */}
-      <div className="text-center mb-6">
+    <motion.div
+      className="p-6 md:p-8"
+      initial="hidden"
+      animate="visible"
+      variants={{
+        hidden: {},
+        visible: { transition: { staggerChildren: 0.04 } },
+      }}
+    >
+      <motion.div
+        variants={{
+          hidden: { opacity: 0, y: 8 },
+          visible: { opacity: 1, y: 0 },
+        }}
+        className="text-center mb-6"
+      >
         <h2 className="text-2xl font-bold text-white mb-1">Create Account</h2>
         <p className="text-sm text-gray-400">Join ONYX Security Platform</p>
-      </div>
+      </motion.div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Username and Full Name Row */}
-        <div className="grid grid-cols-2 gap-3">
+      <motion.form
+        onSubmit={handleSubmit}
+        className="space-y-5"
+        initial="hidden"
+        animate="visible"
+        variants={{
+          hidden: {},
+          visible: { transition: { staggerChildren: 0.04 } },
+        }}
+      >
+        <motion.div
+          variants={{
+            hidden: { opacity: 0, y: 8 },
+            visible: { opacity: 1, y: 0 },
+          }}
+          className="grid grid-cols-2 gap-4"
+        >
           <div>
-            <label className="text-xs font-medium text-gray-400 mb-1.5 block">
+            <label className="flex items-center gap-1.5 text-xs font-medium text-gray-400 mb-1.5">
+              <AtSymbolIcon className="w-3.5 h-3.5 text-cyan-400" />
               Username
             </label>
-            <input
+            <Input
               type="text"
               value={formData.username}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, username: e.target.value }))
-              }
-              className="w-full px-3 py-2.5 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all"
+              onChange={(e) => setFormData((prev) => ({ ...prev, username: e.target.value }))}
               placeholder="username"
               required
+              aria-required="true"
+              autoComplete="username"
             />
           </div>
-
           <div>
-            <label className="text-xs font-medium text-gray-400 mb-1.5 block">
+            <label className="flex items-center gap-1.5 text-xs font-medium text-gray-400 mb-1.5">
+              <UserIcon className="w-3.5 h-3.5 text-violet-400" />
               Full Name
             </label>
-            <input
+            <Input
               type="text"
               value={formData.full_name}
               onChange={(e) =>
@@ -126,50 +151,61 @@ export const RegisterForm = ({
                   full_name: e.target.value,
                 }))
               }
-              className="w-full px-3 py-2.5 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500 transition-all"
               placeholder="John Doe"
               required
+              aria-required="true"
+              autoComplete="name"
             />
           </div>
-        </div>
+        </motion.div>
 
-        {/* Email */}
-        <div>
-          <label className="text-xs font-medium text-gray-400 mb-1.5 block">
+        <motion.div
+          variants={{
+            hidden: { opacity: 0, y: 8 },
+            visible: { opacity: 1, y: 0 },
+          }}
+        >
+          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-400 mb-1.5">
+            <EnvelopeIcon className="w-3.5 h-3.5 text-cyan-400" />
             Email
           </label>
-          <input
+          <Input
             type="email"
             value={formData.email}
-            onChange={(e) =>
-              setFormData((prev) => ({ ...prev, email: e.target.value }))
-            }
-            className="w-full px-3 py-2.5 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all"
+            onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
             placeholder="your@email.com"
             required
+            aria-required="true"
+            autoComplete="email"
           />
-        </div>
+        </motion.div>
 
-        {/* Password */}
-        <div>
-          <label className="text-xs font-medium text-gray-400 mb-1.5 block">
+        <motion.div
+          variants={{
+            hidden: { opacity: 0, y: 8 },
+            visible: { opacity: 1, y: 0 },
+          }}
+        >
+          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-400 mb-1.5">
+            <LockClosedIcon className="w-3.5 h-3.5 text-violet-400" />
             Password
           </label>
           <div className="relative">
-            <input
+            <Input
               type={showPassword ? "text" : "password"}
               value={formData.password}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, password: e.target.value }))
-              }
-              className="w-full px-3 py-2.5 pr-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all"
+              onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
               placeholder="Strong password"
               required
+              aria-required="true"
+              autoComplete="new-password"
+              className="pr-10"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 rounded"
             >
               {showPassword ? (
                 <EyeSlashIcon className="h-4 w-4" />
@@ -178,41 +214,50 @@ export const RegisterForm = ({
               )}
             </button>
           </div>
+          {formData.password && (
+            <motion.div
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-2 flex flex-wrap gap-x-4 gap-y-1"
+            >
+              {[
+                { key: "length", label: "8+ characters" },
+                { key: "uppercase", label: "Uppercase" },
+                { key: "lowercase", label: "Lowercase" },
+                { key: "number", label: "Number" },
+                { key: "special", label: "Special char" },
+              ].map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-1.5">
+                  {passwordValidation[key] ? (
+                    <CheckCircleIcon className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                  ) : (
+                    <div className="w-3.5 h-3.5 rounded-full border border-gray-600 flex-shrink-0" />
+                  )}
+                  <span
+                    className={`text-xs transition-colors ${
+                      passwordValidation[key] ? "text-green-400" : "text-gray-500"
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </motion.div>
 
-          {/* Password Requirements */}
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {Object.entries({
-              length: "8+ characters",
-              uppercase: "Uppercase letter",
-              lowercase: "Lowercase letter",
-              number: "Number",
-              special: "Special character",
-            }).map(([key, label]) => (
-              <div key={key} className="flex items-center gap-2">
-                <div
-                  className={`h-2 w-2 rounded-full transition-colors ${
-                    passwordValidation[key] ? "bg-green-500" : "bg-gray-600"
-                  }`}
-                />
-                <span
-                  className={`text-xs transition-colors ${
-                    passwordValidation[key] ? "text-green-400" : "text-gray-400"
-                  }`}
-                >
-                  {label}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Confirm Password */}
-        <div>
-          <label className="text-xs font-medium text-gray-400 mb-1.5 block">
+        <motion.div
+          variants={{
+            hidden: { opacity: 0, y: 8 },
+            visible: { opacity: 1, y: 0 },
+          }}
+        >
+          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-400 mb-1.5">
+            <LockClosedIcon className="w-3.5 h-3.5 text-violet-400" />
             Confirm Password
           </label>
           <div className="relative">
-            <input
+            <Input
               type={showConfirmPassword ? "text" : "password"}
               value={formData.confirm_password}
               onChange={(e) =>
@@ -221,14 +266,17 @@ export const RegisterForm = ({
                   confirm_password: e.target.value,
                 }))
               }
-              className="w-full px-3 py-2.5 pr-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500 transition-all"
               placeholder="Confirm password"
               required
+              aria-required="true"
+              autoComplete="new-password"
+              className="pr-10"
             />
             <button
               type="button"
               onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+              aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors z-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 rounded"
             >
               {showConfirmPassword ? (
                 <EyeSlashIcon className="h-4 w-4" />
@@ -237,45 +285,54 @@ export const RegisterForm = ({
               )}
             </button>
           </div>
-          {formData.confirm_password &&
-            formData.password !== formData.confirm_password && (
-              <p className="mt-1.5 text-xs text-red-400">
-                Passwords don't match
-              </p>
-            )}
-        </div>
-
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full px-4 py-3 bg-gradient-to-r from-cyan-500 via-violet-500 to-cyan-500 text-white font-semibold rounded-xl hover:from-cyan-600 hover:via-violet-600 hover:to-cyan-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
-        >
-          {isLoading ? (
-            <>
-              <ArrowPathIcon className="w-5 h-5 animate-spin" />
-              Creating Account...
-            </>
-          ) : (
-            <>
-              Create Account
-              <ArrowRightIcon className="w-5 h-5" />
-            </>
+          {formData.confirm_password && formData.password !== formData.confirm_password && (
+            <p className="mt-1.5 text-xs text-red-400">Passwords don't match</p>
           )}
-        </button>
-      </form>
+        </motion.div>
 
-      <div className="mt-6 text-center">
+        <motion.div
+          variants={{
+            hidden: { opacity: 0, y: 8 },
+            visible: { opacity: 1, y: 0 },
+          }}
+        >
+          <Button
+            type="submit"
+            disabled={isLoading}
+            gradient
+            rightIcon={isLoading ? undefined : <ArrowRightIcon className="w-5 h-5" />}
+            isLoading={isLoading}
+            className="w-full"
+          >
+            Create Account
+          </Button>
+        </motion.div>
+      </motion.form>
+
+      <motion.div
+        variants={{
+          hidden: { opacity: 0, y: 8 },
+          visible: { opacity: 1, y: 0 },
+        }}
+        className="mt-8 text-center"
+      >
         <span className="text-gray-400">Already have an account? </span>
         <button
+          type="button"
           onClick={onSwitchToLogin}
-          className="text-transparent bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text font-semibold hover:from-cyan-300 hover:to-violet-300 transition-all"
+          className="font-semibold text-transparent bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text hover:from-cyan-300 hover:to-violet-300 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 rounded"
         >
           Sign in
         </button>
-      </div>
+      </motion.div>
 
-      {/* Trust Badges */}
-      <div className="mt-8 pt-6 border-t border-gray-700/50">
+      <motion.div
+        variants={{
+          hidden: { opacity: 0, y: 8 },
+          visible: { opacity: 1, y: 0 },
+        }}
+        className="mt-8 pt-6 border-t border-gray-700/50"
+      >
         <div className="flex items-center justify-center gap-6 text-gray-500 text-xs">
           <div className="flex items-center gap-1">
             <CheckCircleIcon className="w-4 h-4 text-cyan-400" />
@@ -290,7 +347,7 @@ export const RegisterForm = ({
             <span>No Credit Card</span>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };

@@ -1,11 +1,11 @@
 """
 Configuration settings for ONYX Security Intelligence Platform
 """
-import os
 import logging
 from typing import Optional
-from pydantic_settings import BaseSettings
+
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     mongo_password: Optional[str] = Field(default=None, env="MONGO_PASSWORD")
     
     # Security
-    secret_key: str = Field(..., env="SECRET_KEY")
+    secret_key: str = Field(..., env="SECRET_KEY", min_length=32)
     algorithm: str = Field(default="HS256", env="ALGORITHM")
     access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=30, env="REFRESH_TOKEN_EXPIRE_DAYS")
@@ -43,20 +43,63 @@ class Settings(BaseSettings):
     require_email_verification: bool = Field(default=True, env="REQUIRE_EMAIL_VERIFICATION")
     max_failed_login_attempts: int = Field(default=5, env="MAX_FAILED_LOGIN_ATTEMPTS")
     account_lockout_duration_minutes: int = Field(default=30, env="ACCOUNT_LOCKOUT_DURATION_MINUTES")
+
+    # Google SSO (OAuth 2.0 via Google Identity Services ID tokens)
+    # GOOGLE_CLIENT_ID enables the SSO endpoints + "Continue with Google" on login.
+    # GOOGLE_ALLOWED_DOMAINS optionally restricts SSO to a comma-separated domain allowlist.
+    google_client_id: Optional[str] = Field(default=None, env="GOOGLE_CLIENT_ID")
+    google_allowed_domains: str = Field(default="", env="GOOGLE_ALLOWED_DOMAINS")
+
+    @property
+    def google_sso_enabled(self) -> bool:
+        return bool(self.google_client_id)
     
     # AI Configuration
-    ai_provider: str = Field(default="openai", env="AI_PROVIDER")  # openai or gemini
-    
-    # OpenAI
+    # Supported providers: auto (follows ai_provider_chain), ollama, openai, gemini, groq, openrouter
+    ai_provider: str = Field(default="auto", env="AI_PROVIDER")
+    # Failover chain used when ai_provider=auto (left -> right)
+    ai_provider_chain: str = Field(default="gemini,groq,openrouter,ollama", env="AI_PROVIDER_CHAIN")
+
+    # OpenAI (legacy fallback)
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-4", env="OPENAI_MODEL")
+    openai_model: str = Field(default="gpt-4o-mini", env="OPENAI_MODEL")
     openai_max_tokens: int = Field(default=2000, env="OPENAI_MAX_TOKENS")
-    
-    # Google Gemini
+
+    # Google Gemini (primary free-tier provider)
     gemini_api_key: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-1.5-flash", env="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-2.5-flash", env="GEMINI_MODEL")
     gemini_max_tokens: int = Field(default=2000, env="GEMINI_MAX_TOKENS")
-    
+
+    # Groq (free-tier fallback, OpenAI-compatible API)
+    groq_api_key: Optional[str] = Field(default=None, env="GROQ_API_KEY")
+    groq_model: str = Field(default="openai/gpt-oss-120b", env="GROQ_MODEL")
+
+    # OpenRouter (free-tier fallback, OpenAI-compatible API)
+    openrouter_api_key: Optional[str] = Field(default=None, env="OPENROUTER_API_KEY")
+    openrouter_model: str = Field(default="google/gemma-4-27b-it:free", env="OPENROUTER_MODEL")
+
+    # Ollama (self-hosted local LLM, dev only)
+    ai_local_base_url: str = Field(default="http://ollama:11434/v1", env="AI_LOCAL_BASE_URL")
+    ai_local_model: str = Field(default="qwen2.5-coder:7b", env="AI_LOCAL_MODEL")
+    ai_local_timeout: int = Field(default=120, env="AI_LOCAL_TIMEOUT")
+
+    # AI gateway governance (budget protection)
+    ai_rate_limit_rpm: int = Field(default=15, env="AI_RATE_LIMIT_RPM")      # per provider, per minute
+    ai_rate_limit_rpd: int = Field(default=500, env="AI_RATE_LIMIT_RPD")     # per provider, per day
+    ai_cache_ttl_days: int = Field(default=7, env="AI_CACHE_TTL_DAYS")
+    ai_enrich_top_n: int = Field(default=10, env="AI_ENRICH_TOP_N")          # findings enriched per scan
+    ai_post_scan_concurrency: int = Field(default=2, env="AI_POST_SCAN_CONCURRENCY")
+
+    # --- Phase 2: RAG / knowledge retrieval --------------------------------
+    knowledge_db_path: str = Field(default="data/knowledge.db", env="KNOWLEDGE_DB_PATH")
+    ai_embed_model: str = Field(default="gemini-embedding-2", env="AI_EMBED_MODEL")
+    ai_embed_local_model: str = Field(default="nomic-embed-text", env="AI_EMBED_LOCAL_MODEL")
+    ai_embed_dimensions: int = Field(default=768, env="AI_EMBED_DIMENSIONS")
+    ai_embed_batch_size: int = Field(default=16, env="AI_EMBED_BATCH_SIZE")
+    rag_top_k: int = Field(default=6, env="RAG_TOP_K")
+    rag_rrf_k: int = Field(default=60, env="RAG_RRF_K")
+    rag_max_context_chars: int = Field(default=6000, env="RAG_MAX_CONTEXT_CHARS")
+
     # Notifications
     slack_webhook_url: Optional[str] = Field(default=None, env="SLACK_WEBHOOK_URL")
     teams_webhook_url: Optional[str] = Field(default=None, env="TEAMS_WEBHOOK_URL")
@@ -73,12 +116,8 @@ class Settings(BaseSettings):
     email_from_name: str = Field(default="ONYX Platform", env="EMAIL_FROM_NAME")
     
     # Email Provider Presets (for easy configuration)
-    # Options: gmail, outlook, sendgrid, brevo (for Render/cloud platforms)
+    # Options: gmail, outlook, sendgrid, custom
     email_provider: Optional[str] = Field(default=None, env="EMAIL_PROVIDER")
-    
-    # Brevo (Sendinblue) API Key (for HTTP-based email on cloud platforms like Render)
-    # Free: 300 emails/day, no domain verification required
-    brevo_api_key: Optional[str] = Field(default=None, env="BREVO_API_KEY")
     
     slack_channel: str = Field(default="#dev-alerts", env="SLACK_CHANNEL")
     
@@ -151,10 +190,46 @@ class Settings(BaseSettings):
     # Git operations
     git_clone_timeout: int = Field(default=300, env="GIT_CLONE_TIMEOUT")  # 5 minutes
     git_scan_timeout: int = Field(default=600, env="GIT_SCAN_TIMEOUT")   # 10 minutes
+
+    # Webhooks
+    webhook_secret: Optional[str] = Field(default=None, env="WEBHOOK_SECRET")
     
+    # Auto-Fix PRs
+    auto_fix_branch_prefix: str = Field(default="onyx-auto-fix/", env="AUTO_FIX_BRANCH_PREFIX")
+    auto_fix_pr_title_prefix: str = Field(default="[ONYX Auto-Fix] ", env="AUTO_FIX_PR_TITLE_PREFIX")
+
+    # --- Phase 3: Agentic fix-agent + AI safety (spec 4.2-4.5) ------------
+    # Human approval ON by default: propose -> gates -> pending fix stored;
+    # the PR is opened only by an explicit approve call (spec 4.3.4).
+    auto_fix_requires_approval: bool = Field(default=True, env="AUTO_FIX_REQUIRES_APPROVAL")
+    # Dry-run: compute + gate + show the diff; never persist, push, or open PRs.
+    auto_fix_dry_run: bool = Field(default=False, env="AUTO_FIX_DRY_RUN")
+    auto_fix_max_diff_lines: int = Field(default=50, env="AUTO_FIX_MAX_DIFF_LINES")
+    # Loop caps (spec 4.3.5): Agent(retries={'tools': fix_agent_max_tool_retries})
+    # bounds model turns to 1 + retries = 3 by default ("<=3 LLM turns").
+    fix_agent_max_tool_retries: int = Field(default=2, env="FIX_AGENT_MAX_TOOL_RETRIES")
+    fix_agent_output_token_limit: int = Field(default=4000, env="FIX_AGENT_OUTPUT_TOKEN_LIMIT")
+    # Inbound prompt-injection screening via llama-prompt-guard-2 (spec 4.3.6).
+    injection_screen_enabled: bool = Field(default=True, env="INJECTION_SCREEN_ENABLED")
+    injection_screen_fail_open: bool = Field(default=True, env="INJECTION_SCREEN_FAIL_OPEN")
+    injection_screen_model: str = Field(default="meta-llama/llama-prompt-guard-2-86m", env="INJECTION_SCREEN_MODEL")
+
+    # --- Phase 4: Investigate agent + ML triage (spec 4.4, 5.1 P4) --------
+    investigate_agent_enabled: bool = Field(default=True, env="INVESTIGATE_AGENT_ENABLED")
+    investigate_agent_max_tool_retries: int = Field(default=2, env="INVESTIGATE_AGENT_MAX_TOOL_RETRIES")
+    investigate_agent_output_token_limit: int = Field(default=3000, env="INVESTIGATE_AGENT_OUTPUT_TOKEN_LIMIT")
+    # IsolationForest activation gate: stays OFF until real scan history exists.
+    ml_isolation_forest_enabled: bool = Field(default=False, env="ML_ISOLATION_FOREST_ENABLED")
+    ml_min_training_scans: int = Field(default=30, env="ML_MIN_TRAINING_SCANS")
+    ml_training_window_days: int = Field(default=90, env="ML_TRAINING_WINDOW_DAYS")
+
     # WebSocket
     websocket_heartbeat_interval: int = Field(default=30, env="WEBSOCKET_HEARTBEAT_INTERVAL")
     
+    # Monitoring
+    sentry_dsn: str = Field(default="", env="SENTRY_DSN")
+    enable_prometheus: bool = Field(default=True, env="ENABLE_PROMETHEUS")
+
     # Storage
     temp_dir: str = Field(default="/tmp/onyx", env="TEMP_DIR")
     cleanup_after_scan: bool = Field(default=True, env="CLEANUP_AFTER_SCAN")
@@ -162,37 +237,65 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         """Convert CORS_ORIGINS string to list"""
-        if not self.cors_origins:
-            # In development, allow localhost origins. In production, this should be explicitly set.
-            import os
-            if os.getenv("ENVIRONMENT", "development").lower() == "production":
-                # Production: Only allow specific origins (should be configured via CORS_ORIGINS env var)
-                return ["https://onyx-platform.vercel.app"]
-            return ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"]
-        # Split by comma and clean up whitespace
-        origins = [origin.strip() for origin in self.cors_origins.split(",")]
-        return [origin for origin in origins if origin]  # Remove empty strings
+        if self.cors_origins and self.cors_origins.strip():
+            origins = [origin.strip() for origin in self.cors_origins.split(",")]
+            return [origin for origin in origins if origin]
+        if self.environment.lower() == "production":
+            return []  # Configure CORS_ORIGINS or ALLOWED_ORIGINS env var for production
+        return ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"]
     
+    def provider_chain(self) -> list[str]:
+        """Ordered provider names for the configured AI provider mode."""
+        if self.ai_provider.lower() != "auto":
+            return [self.ai_provider.lower()]
+        return [p.strip().lower() for p in self.ai_provider_chain.split(",") if p.strip()]
+
+    def _provider_configured(self, name: str) -> bool:
+        """Whether a provider has credentials (ollama needs none)."""
+        if name == "ollama":
+            return True
+        keys = {
+            "openai": self.openai_api_key,
+            "gemini": self.gemini_api_key,
+            "groq": self.groq_api_key,
+            "openrouter": self.openrouter_api_key,
+        }
+        key = keys.get(name)
+        return bool(key) and len(key) > 10
+
+    def configured_provider_chain(self) -> list[str]:
+        """Chain entries that are actually usable right now."""
+        chain = [name for name in self.provider_chain() if self._provider_configured(name)]
+        if self.ai_provider.lower() != "auto":
+            return chain
+        # Legacy installs may only have OPENAI_API_KEY set; keep it as a last resort.
+        if self._provider_configured("openai") and "openai" not in chain:
+            chain.append("openai")
+        return chain
+
     def validate_ai_config(self) -> tuple[bool, str]:
         """
         Validate that the selected AI provider has a valid API key configured.
         Returns (is_valid, message) tuple.
         """
-        if self.ai_provider == "openai":
-            if not self.openai_api_key:
-                return False, "OPENAI_API_KEY is required when ai_provider=openai"
-            if self.openai_api_key.startswith("sk-") and len(self.openai_api_key) > 20:
-                return True, "OpenAI configuration valid"
-            return False, "OPENAI_API_KEY appears to be invalid format"
-        elif self.ai_provider == "gemini":
-            if not self.gemini_api_key:
-                return False, "GEMINI_API_KEY is required when ai_provider=gemini"
-            if len(self.gemini_api_key) > 10:
-                return True, "Gemini configuration valid"
-            return False, "GEMINI_API_KEY appears to be invalid format"
-        else:
-            return False, f"Unknown AI provider: {self.ai_provider}. Use 'openai' or 'gemini'"
-    
+        provider = self.ai_provider.lower()
+        if provider == "auto":
+            chain = self.configured_provider_chain()
+            if not chain:
+                return False, "No AI providers configured for AI_PROVIDER_CHAIN"
+            return True, "Auto AI chain: " + " -> ".join(chain)
+        if provider == "ollama":
+            return True, "Ollama local AI configured"
+        if provider not in ("openai", "gemini", "groq", "openrouter"):
+            return False, (
+                f"Unknown AI provider: {provider}. "
+                "Use 'auto', 'ollama', 'openai', 'gemini', 'groq', or 'openrouter'"
+            )
+        api_key = getattr(self, f"{provider}_api_key")
+        if api_key and len(api_key) > 10:
+            return True, f"{provider.capitalize()} configuration valid"
+        return False, f"{provider.upper()}_API_KEY is required when ai_provider={provider}"
+
     @property
     def ai_available(self) -> bool:
         """Check if AI functionality is properly configured"""
@@ -228,22 +331,32 @@ def validate_settings_on_startup():
         logger.warning("⚠️ AI-powered features (remediation, analysis) will be unavailable.")
     else:
         logger.info(f"✅ AI Configuration: {message}")
-    
-    # Check for fallback AI provider
-    has_openai = settings.openai_api_key and len(settings.openai_api_key) > 10
-    has_gemini = settings.gemini_api_key and len(settings.gemini_api_key) > 10
-    
-    if has_openai and has_gemini:
-        logger.info("✅ Both OpenAI and Gemini configured - fallback available")
-    elif has_openai or has_gemini:
-        logger.info("ℹ️ Only one AI provider configured - no fallback available")
-    else:
+
+    configured = settings.configured_provider_chain()
+    if "ollama" in configured:
+        logger.info(
+            f"✅ Ollama local AI configured at {settings.ai_local_base_url} (model: {settings.ai_local_model})"
+        )
+    cloud = [p for p in configured if p != "ollama"]
+    if len(cloud) >= 2:
+        logger.info(f"ℹ️ Cloud AI providers available: {', '.join(cloud)}")
+    elif len(cloud) == 1:
+        logger.info(f"ℹ️ One cloud AI provider available: {cloud[0]}")
+    elif not configured:
         logger.warning("⚠️ No AI provider configured - AI features disabled")
-    
+
     # Check email configuration
     if settings.email_enabled:
-        if not settings.smtp_server and not settings.brevo_api_key:
-            logger.warning("⚠️ EMAIL_ENABLED=true but no email provider configured")
+        if not settings.smtp_server:
+            logger.warning("⚠️ EMAIL_ENABLED=true but SMTP_SERVER not configured")
+    
+    # Check webhook authentication (fails closed when unset)
+    if not settings.webhook_secret:
+        logger.warning("⚠️ WEBHOOK_SECRET is not set - the webhook endpoint will return 503 until it is configured")
+    
+    # Check Google SSO configuration
+    if settings.google_client_id and not settings.google_allowed_domains.strip():
+        logger.warning("⚠️ GOOGLE_CLIENT_ID is set but GOOGLE_ALLOWED_DOMAINS is empty - any Google account can sign in")
     
     return is_valid
 

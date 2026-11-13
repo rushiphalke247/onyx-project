@@ -4,19 +4,24 @@ Handles project CRUD operations, team management, and business logic
 """
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from beanie.operators import And, In, Or
 from bson import ObjectId
-from beanie import PydanticObjectId
-from beanie.operators import In, And, Or
 from fastapi import HTTPException, status
 
 from models.project import (
-    Project, ProjectCreateRequest, ProjectUpdateRequest, 
-    TeamMemberRequest, ProjectStatus, ProjectCategory, ProjectPriority,
-    ProjectMember, ScanConfiguration
+    Project,
+    ProjectCategory,
+    ProjectCreateRequest,
+    ProjectPriority,
+    ProjectStatus,
+    ProjectUpdateRequest,
+    ScanConfiguration,
+    TeamMemberRequest,
 )
-from models.user import User, UserRole
 from models.report import ScanReport, WebhookEvent
+from models.user import User
 
 logger = logging.getLogger(__name__)
 class ProjectService:
@@ -336,37 +341,28 @@ class ProjectService:
         # Get recent scan reports
         recent_reports = await ScanReport.find(
             ScanReport.project_name == project.name
-        ).sort(-ScanReport.scan_start_time).limit(10).to_list()
+        ).sort(-ScanReport.started_at).limit(10).to_list()
         
         # Calculate trends
         vulnerability_trend = []
         score_trend = []
         
         for report in reversed(recent_reports):
-            severity_dist = report.severity_distribution or {}
+            severity_dist = report.findings_by_severity or {}
             total_vulns = sum(severity_dist.values())
             vulnerability_trend.append({
-                "date": report.scan_start_time,
+                "date": report.started_at,
                 "count": total_vulns
             })
+            # Calculate a score from findings - use project-level security_score if available
+            score = project.stats.security_score if project.stats.security_score > 0 else 0
             score_trend.append({
-                "date": report.scan_start_time,
-                "score": report.security_score or 0
+                "date": report.started_at,
+                "score": score
             })
         
         return {
-            "basic_stats": project.stats.model_dump() if project.stats else {
-                "total_scans": 0,
-                "last_scan_date": None,
-                "total_vulnerabilities": 0,
-                "critical_count": 0,
-                "high_count": 0,
-                "medium_count": 0,
-                "low_count": 0,
-                "security_score": 0,
-                "open_issues": 0,
-                "resolved_issues": 0,
-            },
+            "basic_stats": project.stats.model_dump(),
             "recent_scans": len(recent_reports),
             "vulnerability_trend": vulnerability_trend,
             "security_score_trend": score_trend,
@@ -468,7 +464,6 @@ class ProjectService:
         2. Project name
         3. Repository URL
         """
-        from bson import ObjectId
         
         project = None
         
@@ -476,7 +471,7 @@ class ProjectService:
         if project_name and len(project_name) == 24:
             try:
                 project = await Project.get(ObjectId(project_name))
-            except:
+            except Exception:
                 pass
         
         # If not found, try by project name

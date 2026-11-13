@@ -6,21 +6,16 @@ import axios from "axios";
 import toast from "react-hot-toast";
 
 // API Configuration - Production ready with environment variable support
-const API_BASE_URL = import.meta.env.DEV
+export const API_BASE_URL = import.meta.env.DEV
   ? "http://127.0.0.1:8000/api" // Direct connection in development with /api prefix
   : import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "/api";
-
-// Check if we're in demo mode (no backend available)
-const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true" || false;
 
 // WebSocket URL - Connect directly to backend in development
 const WS_BASE_URL = import.meta.env.DEV
   ? "ws://127.0.0.1:8000" // Direct connection in development
   : import.meta.env.VITE_WS_URL ||
     import.meta.env.VITE_WEBSOCKET_URL ||
-    (window.location.protocol === "https:" ? "wss:" : "ws:") +
-      "//" +
-      window.location.host;
+    (window.location.protocol === "https:" ? "wss:" : "ws:") + "//" + window.location.host;
 
 // Utility function to clean parameters by removing empty values
 const cleanParams = (params = {}) => {
@@ -39,17 +34,12 @@ const cleanParams = (params = {}) => {
  * @param {string} fallbackMessage - Default message if no specific error found
  * @returns {string} - Human-readable error message
  */
-export const getApiErrorMessage = (
-  error,
-  fallbackMessage = "An error occurred"
-) => {
+export const getApiErrorMessage = (error, fallbackMessage = "An error occurred") => {
   const detail = error.response?.data?.detail;
 
   if (Array.isArray(detail)) {
     // Handle Pydantic validation errors (422 responses)
-    return detail
-      .map((err) => err.msg || err.message || JSON.stringify(err))
-      .join(", ");
+    return detail.map((err) => err.msg || err.message || JSON.stringify(err)).join(", ");
   } else if (typeof detail === "string") {
     return detail;
   } else if (error.response?.data?.message) {
@@ -62,7 +52,7 @@ export const getApiErrorMessage = (
 };
 
 // Create axios instance with default config
-const api = axios.create({
+export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
@@ -95,8 +85,7 @@ api.interceptors.response.use(
     // Handle common error cases
     if (error.response?.status === 401) {
       // Extract error message from response
-      const errorMessage =
-        error.response?.data?.detail || "Authentication failed";
+      const _errorMessage = error.response?.data?.detail || "Authentication failed";
 
       // Try to refresh token only if it's not a login request and we have a refresh token
       const refreshToken = localStorage.getItem("refresh_token");
@@ -156,6 +145,22 @@ export const authAPI = {
     return response.data;
   },
 
+  // Google SSO config (public)
+  getGoogleSSOConfig: async () => {
+    const response = await api.get("/auth/sso/google/config");
+    return response.data;
+  },
+
+  // Google SSO login with an ID token from Google Identity Services
+  googleLogin: async (idToken, twoFactorCode, nonce) => {
+    const response = await api.post("/auth/sso/google", {
+      id_token: idToken,
+      two_factor_code: twoFactorCode || null,
+      nonce: nonce || null,
+    });
+    return response.data;
+  },
+
   // Register user
   register: async (userData) => {
     const response = await api.post("/auth/register", userData);
@@ -205,6 +210,15 @@ export const authAPI = {
   // Confirm password reset
   confirmPasswordReset: async (resetData) => {
     const response = await api.post("/auth/reset-password", resetData);
+    return response.data;
+  },
+
+  // Reset password (used by AuthContext)
+  resetPassword: async (token, newPassword) => {
+    const response = await api.post("/auth/reset-password", {
+      token,
+      new_password: newPassword,
+    });
     return response.data;
   },
 
@@ -348,6 +362,19 @@ export const reportsAPI = {
     }
   },
 
+  aiChat: async (scanId, message, conversationHistory = []) => {
+    const response = await api.post(
+      "/ai/chat",
+      {
+        scan_id: scanId,
+        message,
+        conversation_history: conversationHistory.slice(-20),
+      },
+      { timeout: 300000 }
+    );
+    return response.data;
+  },
+
   // Get analytics overview
   getAnalyticsOverview: async (daysBack = 30, projectName = null) => {
     try {
@@ -367,10 +394,9 @@ export const reportsAPI = {
   // Get project-specific reports
   getProjectReports: async (projectName, params = {}) => {
     try {
-      const response = await api.get(
-        `/reports/project/${encodeURIComponent(projectName)}`,
-        { params: cleanParams(params) }
-      );
+      const response = await api.get(`/reports/project/${encodeURIComponent(projectName)}`, {
+        params: cleanParams(params),
+      });
       return response.data;
     } catch (error) {
       console.error("Error fetching project reports:", error);
@@ -411,9 +437,7 @@ export const reportsAPI = {
       // Fallback to reports if endpoint not available
       if (error.response?.status === 404) {
         const reports = await api.get("/reports/");
-        const scanReport = reports.data.reports?.find(
-          (report) => report.scan_id === scanId
-        );
+        const scanReport = reports.data.reports?.find((report) => report.scan_id === scanId);
         if (scanReport) {
           return {
             scan_id: scanReport.scan_id,
@@ -425,9 +449,7 @@ export const reportsAPI = {
             completed_at: scanReport.completed_at,
             duration_seconds: scanReport.duration_seconds,
             error_message: scanReport.error_message,
-            progress:
-              scanReport.progress ||
-              (scanReport.status === "completed" ? 100 : 0),
+            progress: scanReport.progress || (scanReport.status === "completed" ? 100 : 0),
             current_scanner: scanReport.current_scanner || null,
           };
         }
@@ -558,10 +580,7 @@ export const projectsAPI = {
   // Add member to project
   addMember: async (projectId, memberData) => {
     try {
-      const response = await api.post(
-        `/projects/${projectId}/members`,
-        memberData
-      );
+      const response = await api.post(`/projects/${projectId}/members`, memberData);
       return response.data;
     } catch (error) {
       console.error("Error adding project member:", error);
@@ -572,9 +591,7 @@ export const projectsAPI = {
   // Remove member from project
   removeMember: async (projectId, memberId) => {
     try {
-      const response = await api.delete(
-        `/projects/${projectId}/members/${memberId}`
-      );
+      const response = await api.delete(`/projects/${projectId}/members/${memberId}`);
       return response.data;
     } catch (error) {
       console.error("Error removing project member:", error);
@@ -585,10 +602,7 @@ export const projectsAPI = {
   // Update member role
   updateMemberRole: async (projectId, memberId, roleData) => {
     try {
-      const response = await api.put(
-        `/projects/${projectId}/members/${memberId}`,
-        roleData
-      );
+      const response = await api.put(`/projects/${projectId}/members/${memberId}`, roleData);
       return response.data;
     } catch (error) {
       console.error("Error updating member role:", error);
@@ -851,11 +865,12 @@ export const webhookAPI = {
       // Webhook endpoints are not under /api prefix
       const backendBaseUrl = API_BASE_URL.replace("/api", "");
       const queryParams = new URLSearchParams(params).toString();
-      const url = `${backendBaseUrl}/webhook/events${
-        queryParams ? "?" + queryParams : ""
-      }`;
+      const url = `${backendBaseUrl}/webhook/events${queryParams ? "?" + queryParams : ""}`;
 
-      const response = await fetch(url);
+      const token = localStorage.getItem("access_token");
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -937,8 +952,7 @@ class WebSocketService {
       // Don't create a new connection if one already exists and is connecting/open
       if (
         this.ws &&
-        (this.ws.readyState === WebSocket.CONNECTING ||
-          this.ws.readyState === WebSocket.OPEN)
+        (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)
       ) {
         return;
       }
@@ -949,9 +963,7 @@ class WebSocketService {
       }
 
       // Build WebSocket URL with optional auth token
-      let wsUrl = WS_BASE_URL.endsWith("/ws")
-        ? WS_BASE_URL
-        : `${WS_BASE_URL}/ws`;
+      let wsUrl = WS_BASE_URL.endsWith("/ws") ? WS_BASE_URL : `${WS_BASE_URL}/ws`;
 
       // Append auth token if available for authenticated notifications
       const token = localStorage.getItem("access_token");
@@ -1128,8 +1140,32 @@ export const utils = {
       critical: "text-red-600 bg-red-100",
       high: "text-orange-600 bg-orange-100",
       medium: "text-yellow-600 bg-yellow-100",
-      low: "text-blue-600 bg-blue-100",
+      low: "text-cyan-600 bg-cyan-100",
       info: "text-gray-600 bg-gray-100",
+    };
+    return colors[severity?.toLowerCase()] || colors.info;
+  },
+
+  // Get severity background color
+  getSeverityBgColor: (severity) => {
+    const colors = {
+      critical: "bg-red-100",
+      high: "bg-orange-100",
+      medium: "bg-yellow-100",
+      low: "bg-cyan-100",
+      info: "bg-gray-100",
+    };
+    return colors[severity?.toLowerCase()] || colors.info;
+  },
+
+  // Get severity text color
+  getSeverityTextColor: (severity) => {
+    const colors = {
+      critical: "text-red-600",
+      high: "text-orange-600",
+      medium: "text-yellow-600",
+      low: "text-cyan-600",
+      info: "text-gray-600",
     };
     return colors[severity?.toLowerCase()] || colors.info;
   },
@@ -1173,8 +1209,7 @@ export const utils = {
 
   // Validate repository URL
   validateRepoUrl: (url) => {
-    const gitUrlPattern =
-      /^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\/.+\/.+/;
+    const gitUrlPattern = /^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\/.+\/.+/;
     return gitUrlPattern.test(url);
   },
 
@@ -1228,7 +1263,7 @@ export const utils = {
   getStatusColor: (status) => {
     const colors = {
       completed: "text-green-400 bg-green-400/10 border-green-400/30",
-      running: "text-blue-400 bg-blue-400/10 border-blue-400/30",
+      running: "text-cyan-400 bg-cyan-400/10 border-cyan-400/30",
       pending: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
       failed: "text-red-400 bg-red-400/10 border-red-400/30",
     };
@@ -1345,9 +1380,7 @@ export const enterpriseAPI = {
   // Get retention policy by ID
   getRetentionPolicyById: async (policyId) => {
     try {
-      const response = await api.get(
-        `/enterprise/retention-policies/${policyId}`
-      );
+      const response = await api.get(`/enterprise/retention-policies/${policyId}`);
       return response.data;
     } catch (error) {
       console.error("Get retention policy error:", error);
@@ -1358,10 +1391,7 @@ export const enterpriseAPI = {
   // Create retention policy
   createRetentionPolicy: async (policyData) => {
     try {
-      const response = await api.post(
-        "/enterprise/retention-policies",
-        policyData
-      );
+      const response = await api.post("/enterprise/retention-policies", policyData);
       return response.data;
     } catch (error) {
       console.error("Create retention policy error:", error);
@@ -1372,10 +1402,7 @@ export const enterpriseAPI = {
   // Update retention policy
   updateRetentionPolicy: async (policyId, policyData) => {
     try {
-      const response = await api.put(
-        `/enterprise/retention-policies/${policyId}`,
-        policyData
-      );
+      const response = await api.put(`/enterprise/retention-policies/${policyId}`, policyData);
       return response.data;
     } catch (error) {
       console.error("Update retention policy error:", error);
@@ -1386,9 +1413,7 @@ export const enterpriseAPI = {
   // Delete retention policy
   deleteRetentionPolicy: async (policyId) => {
     try {
-      const response = await api.delete(
-        `/enterprise/retention-policies/${policyId}`
-      );
+      const response = await api.delete(`/enterprise/retention-policies/${policyId}`);
       return response.data;
     } catch (error) {
       console.error("Delete retention policy error:", error);
@@ -1399,9 +1424,7 @@ export const enterpriseAPI = {
   // Execute retention policy
   executeRetentionPolicy: async (policyId) => {
     try {
-      const response = await api.post(
-        `/enterprise/retention-policies/${policyId}/execute`
-      );
+      const response = await api.post(`/enterprise/retention-policies/${policyId}/execute`);
       return response.data;
     } catch (error) {
       console.error("Execute retention policy error:", error);
@@ -1428,9 +1451,7 @@ export const enterpriseAPI = {
   // Get compliance assessment by ID
   getComplianceAssessmentById: async (assessmentId) => {
     try {
-      const response = await api.get(
-        `/enterprise/compliance/assessments/${assessmentId}`
-      );
+      const response = await api.get(`/enterprise/compliance/assessments/${assessmentId}`);
       return response.data;
     } catch (error) {
       console.error("Get compliance assessment error:", error);
@@ -1441,10 +1462,7 @@ export const enterpriseAPI = {
   // Create compliance assessment
   createComplianceAssessment: async (assessmentData) => {
     try {
-      const response = await api.post(
-        "/enterprise/compliance/assessments",
-        assessmentData
-      );
+      const response = await api.post("/enterprise/compliance/assessments", assessmentData);
       return response.data;
     } catch (error) {
       console.error("Create compliance assessment error:", error);
@@ -1455,9 +1473,7 @@ export const enterpriseAPI = {
   // Get compliance framework summary
   getComplianceFrameworkSummary: async () => {
     try {
-      const response = await api.get(
-        "/enterprise/compliance/framework-summary"
-      );
+      const response = await api.get("/enterprise/compliance/framework-summary");
       return response.data;
     } catch (error) {
       console.error("Get compliance framework summary error:", error);
@@ -1468,12 +1484,9 @@ export const enterpriseAPI = {
   // Export compliance report
   exportComplianceReport: async ({ assessmentId, format = "json" }) => {
     try {
-      const response = await api.get(
-        `/enterprise/compliance/assessments/${assessmentId}/export`,
-        {
-          params: { format },
-        }
-      );
+      const response = await api.get(`/enterprise/compliance/assessments/${assessmentId}/export`, {
+        params: { format },
+      });
       return response.data;
     } catch (error) {
       console.error("Export compliance report error:", error);
@@ -1633,11 +1646,11 @@ export const enterpriseAPI = {
   // ---------- Scan Comparison ----------
 
   // Compare two scans
-  compareScans: async ({ baseScanId, targetScanId }) => {
+  compareScans: async ({ baseScanId, compareScanId }) => {
     try {
-      const response = await api.post("/enterprise/scans/compare", {
+      const response = await api.post("/enterprise-security/scans/compare", {
         base_scan_id: baseScanId,
-        target_scan_id: targetScanId,
+        compare_scan_id: compareScanId,
       });
       return response.data;
     } catch (error) {
@@ -1662,9 +1675,7 @@ export const enterpriseAPI = {
   // Get scan delta summary
   getScanDelta: async (comparisonId) => {
     try {
-      const response = await api.get(
-        `/enterprise/scans/comparison/${comparisonId}/delta`
-      );
+      const response = await api.get(`/enterprise/scans/comparison/${comparisonId}/delta`);
       return response.data;
     } catch (error) {
       console.error("Get scan delta error:", error);
@@ -1810,9 +1821,7 @@ export const advancedSecurityAPI = {
   // Get rule test status
   getRuleTestStatus: async (ruleId) => {
     try {
-      const response = await api.get(
-        `/v1/security/rules/test-status/${ruleId}`
-      );
+      const response = await api.get(`/v1/security/rules/test-status/${ruleId}`);
       return response.data;
     } catch (error) {
       console.error("Error getting rule test status:", error);
@@ -1927,6 +1936,226 @@ export const advancedSecurityAPI = {
       return response.data;
     } catch (error) {
       console.error("Error getting compliance dashboard:", error);
+      throw error;
+    }
+  },
+};
+
+/**
+ * Scheduled Scans API
+ * Cron-based automatic scanning schedules
+ */
+export const schedulesAPI = {
+  listSchedules: async (params = {}) => {
+    try {
+      const response = await api.get("/schedules", {
+        params: cleanParams(params),
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error listing schedules:", error);
+      throw error;
+    }
+  },
+
+  getSchedule: async (scheduleId) => {
+    try {
+      const response = await api.get(`/schedules/${scheduleId}`);
+      return response.data;
+    } catch (error) {
+      console.error("Error getting schedule:", error);
+      throw error;
+    }
+  },
+
+  createSchedule: async (scheduleData) => {
+    try {
+      const response = await api.post("/schedules", scheduleData);
+      return response.data;
+    } catch (error) {
+      console.error("Error creating schedule:", error);
+      throw error;
+    }
+  },
+
+  updateSchedule: async (scheduleId, scheduleData) => {
+    try {
+      const response = await api.put(`/schedules/${scheduleId}`, scheduleData);
+      return response.data;
+    } catch (error) {
+      console.error("Error updating schedule:", error);
+      throw error;
+    }
+  },
+
+  deleteSchedule: async (scheduleId) => {
+    try {
+      const response = await api.delete(`/schedules/${scheduleId}`);
+      return response.data;
+    } catch (error) {
+      console.error("Error deleting schedule:", error);
+      throw error;
+    }
+  },
+
+  triggerRun: async (scheduleId) => {
+    try {
+      const response = await api.post(`/schedules/${scheduleId}/run`);
+      return response.data;
+    } catch (error) {
+      console.error("Error triggering schedule run:", error);
+      throw error;
+    }
+  },
+
+  toggleSchedule: async (scheduleId) => {
+    try {
+      const response = await api.patch(`/schedules/${scheduleId}/toggle`);
+      return response.data;
+    } catch (error) {
+      console.error("Error toggling schedule:", error);
+      throw error;
+    }
+  },
+
+  getScheduleHistory: async (scheduleId, limit = 20) => {
+    try {
+      const response = await api.get(`/schedules/${scheduleId}/history`, {
+        params: { limit },
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error getting schedule history:", error);
+      throw error;
+    }
+  },
+};
+
+/**
+ * Triage API
+ * Intelligent vulnerability prioritization and business impact scoring
+ */
+export const triageAPI = {
+  getTriage: async (scanId, topN = 20) => {
+    try {
+      const response = await api.get(`/triage/${scanId}?top_n=${topN}`);
+      return response.data;
+    } catch (error) {
+      console.error("Error getting triage data:", error);
+      throw error;
+    }
+  },
+
+  rescoreTriage: async (scanId, context, topN = 20) => {
+    try {
+      const response = await api.post(`/triage/${scanId}?top_n=${topN}`, context);
+      return response.data;
+    } catch (error) {
+      console.error("Error re-scoring triage:", error);
+      throw error;
+    }
+  },
+};
+
+/**
+ * Finding labels API
+ * Per-finding triage labels (accepted / false_positive / dismissed / untriaged)
+ */
+export const labelsAPI = {
+  setFindingLabel: async (scanId, findingId, label) => {
+    try {
+      const response = await api.post(`/reports/${scanId}/findings/${findingId}/label`, {
+        label,
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error setting finding label:", error);
+      throw error;
+    }
+  },
+};
+
+export const secretHistoryAPI = {
+  list: async (projectName, { limit = 50, offset = 0, status } = {}) => {
+    try {
+      const params = { project_name: projectName, limit, offset };
+      if (status) params.status = status;
+      const response = await api.get("/secret-history", { params });
+      return response.data;
+    } catch (error) {
+      console.error("Error listing secret history:", error);
+      throw error;
+    }
+  },
+
+  trends: async (projectName, limit = 30) => {
+    try {
+      const response = await api.get("/secret-history/trends", {
+        params: { project_name: projectName, limit },
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error getting secret trends:", error);
+      throw error;
+    }
+  },
+
+  summary: async (projectName) => {
+    try {
+      const response = await api.get("/secret-history/summary", {
+        params: { project_name: projectName },
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error getting secret summary:", error);
+      throw error;
+    }
+  },
+
+  updateStatus: async (recordId, status) => {
+    try {
+      const response = await api.patch(`/secret-history/${recordId}`, null, {
+        params: { status },
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error updating secret status:", error);
+      throw error;
+    }
+  },
+};
+
+/**
+ * ML API
+ * Admin-only anomaly detection model endpoints
+ */
+export const mlAPI = {
+  getStatus: async () => {
+    try {
+      const response = await api.get("/ml/status");
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching ML status:", error);
+      throw error;
+    }
+  },
+
+  train: async () => {
+    try {
+      const response = await api.post("/ml/train", null, { timeout: 300000 });
+      return response.data;
+    } catch (error) {
+      console.error("Error training ML model:", error);
+      throw error;
+    }
+  },
+
+  getAnomalies: async () => {
+    try {
+      const response = await api.get("/ml/anomalies");
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching ML anomalies:", error);
       throw error;
     }
   },

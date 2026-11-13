@@ -1,0 +1,521 @@
+import { useState, useRef, useEffect } from "react";
+import { useParams, Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { generateViewPDF } from "../../utils/pdfReportGenerator";
+import { reportsAPI, utils } from "../../services/api";
+import toast from "react-hot-toast";
+import { motion } from "framer-motion";
+import {
+  ArrowLeftIcon,
+  ExclamationTriangleIcon,
+  ShieldCheckIcon,
+  ClockIcon,
+  CodeBracketIcon,
+  ArrowPathIcon,
+  CheckCircleIcon,
+  ChartBarIcon,
+  ChatBubbleLeftRightIcon,
+  CpuChipIcon,
+  DocumentTextIcon,
+  SparklesIcon,
+  ArrowsUpDownIcon,
+} from "@heroicons/react/24/outline";
+import { PageContainer, PageHeader, LoadingState, ErrorState } from "../../layouts";
+import ParticleBackground from "../projects/ParticleBackground";
+import { ComplianceMapping } from "./ComplianceMapping";
+import { ReportCharts } from "./ReportCharts";
+import { ExportDropdown } from "./ReportExport";
+import { AISection } from "./AISection";
+import { AIChatPanel } from "./AIChatPanel";
+import { StatusBadge } from "./ReportBadges";
+import SecretDetectionSummary from "./SecretDetectionSummary";
+import FindingCard from "./FindingCard";
+import ScannerResultCard from "./ScannerResultCard";
+import ScanComparison from "../security/ScanComparison";
+import TriageDashboard from "./TriageDashboard";
+import { COMPLIANCE_STANDARDS, mapFindingToCompliance } from "../../utils/complianceMapping";
+import { useLabelFinding } from "../../hooks/useLabelFinding";
+import { useTriageShortcuts } from "../../hooks/useTriageShortcuts";
+import { ShortcutOverlay, KeyboardHintStrip } from "../triage/ShortcutOverlay";
+
+const TABS = [
+  { id: "overview", name: "Overview", icon: ChartBarIcon },
+  { id: "findings", name: "Findings", icon: ShieldCheckIcon },
+  { id: "ai-analysis", name: "AI Analysis", icon: SparklesIcon },
+  { id: "compliance", name: "Compliance", icon: DocumentTextIcon },
+  { id: "scanners", name: "Scanners", icon: CpuChipIcon },
+  { id: "ai-chat", name: "AI Chat", icon: ChatBubbleLeftRightIcon },
+  { id: "compare", name: "Compare", icon: ArrowsUpDownIcon },
+  { id: "triage", name: "Triage", icon: ChartBarIcon },
+];
+
+const SEVERITY_PILLS = [
+  { value: "all", label: "All", color: "" },
+  { value: "critical", label: "Critical", color: "bg-red-500/20 text-red-400 border-red-500/30" },
+  { value: "high", label: "High", color: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
+  {
+    value: "medium",
+    label: "Medium",
+    color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  },
+  { value: "low", label: "Low", color: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" },
+];
+
+const tabAnim = { hidden: { opacity: 0, y: -5 }, show: { opacity: 1, y: 0 } };
+
+const ReportDetails = () => {
+  const { reportId } = useParams();
+  const reportRef = useRef();
+  const [activeTab, setActiveTab] = useState("overview");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedStandards, setSelectedStandards] = useState(["OWASP", "NIST"]);
+
+  const isValidReportId = reportId && reportId !== "undefined" && reportId !== "null";
+
+  const {
+    data: report,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["report", reportId],
+    queryFn: () => reportsAPI.getReport(reportId),
+    enabled: isValidReportId,
+    retry: false,
+  });
+
+  const {
+    data: aiAnalysis,
+    isLoading: aiLoading,
+    error: aiError,
+  } = useQuery({
+    queryKey: ["ai-analysis", reportId],
+    queryFn: () => reportsAPI.getAIAnalysis(reportId),
+    enabled: isValidReportId && !!report,
+    retry: false,
+  });
+
+  const [focusIndex, setFocusIndex] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const { labelFinding } = useLabelFinding({
+    reportId,
+    scanId: report?.scan_id,
+  });
+
+  const getFilteredFindings = () => {
+    let allFindings = [];
+    if (report.findings) allFindings = allFindings.concat(report.findings);
+    else if (report.scan_results)
+      report.scan_results.forEach((sr) => {
+        if (sr.findings) allFindings = allFindings.concat(sr.findings);
+      });
+    return severityFilter === "all"
+      ? allFindings
+      : allFindings.filter((f) => f.severity === severityFilter);
+  };
+
+  const filteredFindings = report ? getFilteredFindings() : [];
+
+  const moveFocus = (delta) => {
+    setFocusIndex((prev) => {
+      const last = filteredFindings.length - 1;
+      if (last < 0) return null;
+      if (prev === null || prev === undefined) return delta > 0 ? 0 : last;
+      return Math.min(Math.max(prev + delta, 0), last);
+    });
+  };
+
+  useTriageShortcuts({
+    enabled: activeTab === "findings" && !!report && !helpOpen,
+    onLabel: (label) => {
+      if (focusIndex === null || !filteredFindings[focusIndex]) {
+        toast.error("No finding focused — press J first");
+        return;
+      }
+      const target = filteredFindings[focusIndex];
+      labelFinding({ findingId: target.id, label });
+    },
+    onMove: moveFocus,
+    onToggleHelp: () => setHelpOpen((open) => !open),
+  });
+
+  useEffect(() => {
+    if (focusIndex === null || activeTab !== "findings") return;
+    const card = document.querySelectorAll("[data-finding-card]")[focusIndex];
+    card?.scrollIntoView?.({ block: "nearest" });
+  }, [focusIndex, activeTab]);
+
+  const handleGenerateViewPDF = async () => {
+    await generateViewPDF({ report, aiAnalysis, reportId, setIsGenerating, toast });
+  };
+
+  if (!isValidReportId) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-900 to-black p-4 sm:p-6 lg:p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="glass-container rounded-2xl p-8 text-center">
+            <ExclamationTriangleIcon className="h-16 w-16 text-amber-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-2">Invalid Report ID</h2>
+            <p className="text-gray-400 mb-6">
+              The report ID is missing or invalid. Please select a valid report.
+            </p>
+            <Link
+              to="/"
+              className="inline-flex items-center px-4 py-2 rounded-full bg-gradient-to-r from-cyan-400 via-violet-500 to-cyan-400 text-white font-semibold hover:from-cyan-300 hover:via-violet-400 hover:to-cyan-300 shadow-lg hover:shadow-xl hover:shadow-cyan-500/20 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+            >
+              <ArrowLeftIcon className="h-4 w-4 mr-2" /> Back to Dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) return <LoadingState message="Loading report..." cards={3} />;
+
+  if (isError || !report) {
+    return (
+      <ErrorState
+        title="Report Not Found"
+        message={error?.message || "The requested report could not be found."}
+        onRetry={refetch}
+      />
+    );
+  }
+
+  const totalFindings =
+    report.findings?.length ||
+    report.scan_results?.reduce((a, sr) => a + (sr.findings?.length || 0), 0) ||
+    0;
+  const hasAiAnalysis = !!aiAnalysis;
+
+  return (
+    <div className="relative min-h-screen">
+      <ParticleBackground />
+      <PageContainer>
+        <div className="max-w-7xl mx-auto print:max-w-none relative z-10">
+          <div className="no-print">
+            <PageHeader
+              title="Security Scan Report"
+              description={report.project_name}
+              icon={DocumentTextIcon}
+              breadcrumb={["Reports", report.project_name]}
+              actions={
+                <div className="flex items-center space-x-2">
+                  <ExportDropdown
+                    reportId={reportId}
+                    onGeneratePDF={handleGenerateViewPDF}
+                    isGenerating={isGenerating}
+                  />
+                  <button
+                    onClick={handleGenerateViewPDF}
+                    disabled={isGenerating}
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium disabled:opacity-50 rounded-full bg-gradient-to-r from-cyan-400 via-violet-500 to-cyan-400 text-white font-semibold hover:from-cyan-300 hover:via-violet-400 hover:to-cyan-300 shadow-lg hover:shadow-xl hover:shadow-cyan-500/20 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+                  >
+                    {isGenerating ? (
+                      <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <DocumentTextIcon className="h-4 w-4 mr-2" />
+                    )}
+                    {isGenerating ? "Generating..." : "Download PDF"}
+                  </button>
+                </div>
+              }
+            />
+          </div>
+
+          <div className="hidden print:block print:mb-8 print:pb-4 print:border-b-2 print:border-cyan-600">
+            <div className="print:text-center">
+              <h1 className="print:text-2xl print:font-bold print:text-cyan-800 print:mb-2">
+                ONYX Security Report
+              </h1>
+              <p className="print:text-gray-600 print:text-sm">
+                Security Analysis Report for {report.project_name}
+              </p>
+              <p className="print:text-gray-500 print:text-xs print:mt-1">
+                Generated:{" "}
+                {new Date().toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}{" "}
+                | Report ID: {reportId}
+              </p>
+            </div>
+          </div>
+
+          <div ref={reportRef} className="print:bg-white">
+            <div className="bg-gray-800/40 backdrop-blur-xl border border-gray-700/50 rounded-2xl p-6 mb-8 print:bg-white print:shadow-none print:border print:border-gray-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center space-x-6 text-sm text-gray-400 print:text-gray-600">
+                    <div className="flex items-center">
+                      <ClockIcon className="h-4 w-4 mr-1" /> {utils.formatDate(report.created_at)}
+                    </div>
+                    <div className="flex items-center">
+                      <CodeBracketIcon className="h-4 w-4 mr-1" />{" "}
+                      {report.git_metadata?.repository_url}
+                    </div>
+                    <div className="flex items-center">
+                      <span className="text-xs bg-gray-700 print:bg-gray-200 px-2 py-1 rounded print:text-gray-700">
+                        {report.git_metadata?.branch || "main"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <StatusBadge status={report.status} />
+                  <div className="mt-2 text-sm text-gray-400 print:text-gray-600">
+                    Scan ID: {report.scan_id}
+                  </div>
+                  {report.duration_seconds && (
+                    <div className="text-sm text-gray-400 print:text-gray-600">
+                      Duration: {Math.round(report.duration_seconds)}s
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-8 no-print">
+              <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-1">
+                <nav className="flex space-x-1">
+                  {TABS.map((tab) => {
+                    const Icon = tab.icon;
+                    const count =
+                      tab.id === "findings"
+                        ? totalFindings
+                        : tab.id === "ai-analysis" && hasAiAnalysis
+                          ? 1
+                          : null;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`relative flex items-center px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 ${
+                          activeTab === tab.id
+                            ? "text-white"
+                            : "text-gray-400 hover:text-gray-300 hover:bg-gray-800/50"
+                        }`}
+                      >
+                        {activeTab === tab.id && (
+                          <motion.div
+                            layoutId="tab-indicator"
+                            className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-violet-500 rounded-xl"
+                            initial={false}
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                          />
+                        )}
+                        <span className="relative z-10 flex items-center">
+                          <Icon className="h-4 w-4 mr-2" /> {tab.name}
+                          {count != null && (
+                            <span
+                              className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                activeTab === tab.id
+                                  ? "bg-white/20 text-white"
+                                  : "bg-gray-700/50 text-gray-400"
+                              }`}
+                            >
+                              {count}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </nav>
+              </div>
+            </div>
+
+            <div className="space-y-8">
+              {activeTab === "overview" && (
+                <motion.div
+                  variants={tabAnim}
+                  initial="hidden"
+                  animate="show"
+                  className="space-y-6"
+                >
+                  <ReportCharts report={report} />
+
+                  {aiAnalysis && (
+                    <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-6">
+                      <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                        <SparklesIcon className="h-5 w-5 mr-2 text-purple-400" />
+                        AI Risk Assessment
+                      </h3>
+                      <div className="prose prose-invert max-w-none">
+                        <p className="text-gray-300">{aiAnalysis.executive_summary}</p>
+                        {aiAnalysis.risk_assessment && (
+                          <div className="mt-4 p-4 bg-purple-900/20 border border-purple-500/30 rounded-lg">
+                            <p className="text-purple-300">{aiAnalysis.risk_assessment}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {report.scan_results && (
+                    <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-6">
+                      <h3 className="text-lg font-semibold text-white mb-4">Scanner Results</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {report.scan_results.map((sr, i) => (
+                          <div
+                            key={sr.scanner || i}
+                            className="bg-gray-800/50 rounded-lg p-4 border border-gray-700"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-white">{sr.scanner}</span>
+                              <StatusBadge status={sr.status} />
+                            </div>
+                            <div className="text-sm text-gray-400">
+                              <div>Findings: {sr.findings_count || 0}</div>
+                              {sr.duration_seconds && (
+                                <div>Duration: {Math.round(sr.duration_seconds)}s</div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
+              {activeTab === "findings" && (
+                <motion.div
+                  variants={tabAnim}
+                  initial="hidden"
+                  animate="show"
+                  className="space-y-6"
+                >
+                  <SecretDetectionSummary filteredFindings={filteredFindings} />
+
+                  <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-semibold text-white">Security Findings</h3>
+                      <div className="flex items-center gap-2">
+                        {SEVERITY_PILLS.map((pill) => (
+                          <button
+                            key={pill.value}
+                            onClick={() => setSeverityFilter(pill.value)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
+                              severityFilter === pill.value
+                                ? pill.color || "bg-gray-700/70 text-white"
+                                : "text-gray-400 hover:text-white hover:bg-gray-700/30"
+                            }`}
+                          >
+                            {pill.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <motion.div
+                    className="space-y-4"
+                    initial="hidden"
+                    animate="show"
+                    variants={{
+                      hidden: {},
+                      show: { transition: { staggerChildren: 0.04 } },
+                    }}
+                  >
+                    {filteredFindings.length > 0 ? (
+                      filteredFindings.map((finding, i) => (
+                        <motion.div
+                          key={finding.id || i}
+                          variants={{
+                            hidden: { opacity: 0, x: -10 },
+                            show: { opacity: 1, x: 0 },
+                          }}
+                        >
+                          <FindingCard
+                            finding={finding}
+                            index={i}
+                            reportId={reportId}
+                            scanId={report.scan_id}
+                            focused={focusIndex === i}
+                            onSelect={() => setFocusIndex(i)}
+                          />
+                        </motion.div>
+                      ))
+                    ) : (
+                      <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-8 text-center">
+                        <CheckCircleIcon className="h-12 w-12 text-green-400 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-white mb-2">No Findings</h3>
+                        <p className="text-gray-400">
+                          {severityFilter === "all"
+                            ? "No security findings were detected in this scan."
+                            : `No ${severityFilter} severity findings found.`}
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
+
+                  <KeyboardHintStrip />
+                  <ShortcutOverlay isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+                </motion.div>
+              )}
+
+              {activeTab === "ai-analysis" && (
+                <AISection aiAnalysis={aiAnalysis} aiLoading={aiLoading} aiError={aiError} />
+              )}
+
+              {activeTab === "ai-chat" && <AIChatPanel scanId={report.scan_id} />}
+
+              {activeTab === "scanners" && (
+                <motion.div
+                  className="space-y-6"
+                  initial="hidden"
+                  animate="show"
+                  variants={{
+                    hidden: {},
+                    show: { transition: { staggerChildren: 0.06 } },
+                  }}
+                >
+                  {report.scan_results && report.scan_results.length > 0 ? (
+                    report.scan_results.map((sr, i) => (
+                      <ScannerResultCard key={sr.scanner || i} scanResult={sr} index={i} />
+                    ))
+                  ) : (
+                    <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-8 text-center">
+                      <CpuChipIcon className="h-12 w-12 text-gray-500 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-white mb-2">No Scanner Results</h3>
+                      <p className="text-gray-400">
+                        No detailed scanner results are available for this report.
+                      </p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
+              {activeTab === "compare" && <ScanComparison projectName={report.project_name} />}
+
+              {activeTab === "triage" && (
+                <TriageDashboard scanId={report.scan_id} reportId={reportId} />
+              )}
+
+              {activeTab === "compliance" && (
+                <ComplianceMapping
+                  COMPLIANCE_STANDARDS={COMPLIANCE_STANDARDS}
+                  selectedStandards={selectedStandards}
+                  onToggleStandard={(std) => {
+                    setSelectedStandards((prev) =>
+                      prev.includes(std) ? prev.filter((s) => s !== std) : [...prev, std]
+                    );
+                  }}
+                  getFilteredFindings={getFilteredFindings}
+                  mapFindingToCompliance={mapFindingToCompliance}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      </PageContainer>
+    </div>
+  );
+};
+
+export default ReportDetails;

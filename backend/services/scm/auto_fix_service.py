@@ -1,0 +1,296 @@
+import logging
+import os
+import tempfile
+from datetime import datetime, timezone
+from typing import Optional
+from urllib.parse import urlparse
+
+import httpx
+from bson import ObjectId
+
+from config import settings
+from models.project import Project
+from models.report import ScanReport, VulnerabilityFinding
+from utils.repo_clone import validate_repo_url
+from utils.scrub import scrub_text
+from utils.url_redaction import strip_url_credentials
+
+logger = logging.getLogger(__name__)
+
+
+class AutoFixError(Exception):
+    pass
+
+
+class AutoFixService:
+
+    def _find_finding(
+        self, scan_report: ScanReport, finding_id: str
+    ) -> Optional[VulnerabilityFinding]:
+        for scan_result in scan_report.scan_results:
+            for finding in scan_result.findings:
+                if finding.id == finding_id:
+                    return finding
+        return None
+
+    async def _resolve_token(self, scan_report: ScanReport) -> Optional[str]:
+        project_id = getattr(scan_report, "project_id", None)
+        if not project_id:
+            return None
+
+        try:
+            if ObjectId.is_valid(str(project_id)):
+                project = await Project.get(ObjectId(str(project_id)))
+            else:
+                project = await Project.find_one({"project_id": str(project_id)})
+        except Exception:
+            logger.warning("Auto-fix token lookup failed", exc_info=True)
+            return None
+
+        if not project or not project.repository:
+            return None
+
+        report_metadata = getattr(scan_report, "git_metadata", None)
+        report_url = strip_url_credentials(
+            (getattr(report_metadata, "repository_url", "") or "")
+        )
+        project_url = strip_url_credentials(project.repository.url or "")
+
+        def normalize(value: str) -> str:
+            return value.strip().rstrip("/").removesuffix(".git")
+
+        if not report_url or normalize(report_url) != normalize(project_url):
+            logger.warning(
+                "Auto-fix token withheld: report repository does not match project"
+            )
+            return None
+
+        return project.repository.access_token or None
+
+    def _clone_repo(self, repo_url: str, branch: str, token: Optional[str]) -> str:
+        from git import Repo
+        from git.exc import GitCommandError
+
+        validate_repo_url(repo_url)
+
+        clone_url = repo_url
+        if token:
+            parsed = urlparse(repo_url)
+            if parsed.scheme.lower() in ("http", "https"):
+                clone_url = f"https://{token}@{parsed.netloc}{parsed.path}"
+
+        local_path = tempfile.mkdtemp(prefix="onyx-autofix-")
+        try:
+            Repo.clone_from(clone_url, local_path, branch=branch, depth=1)
+            return local_path
+        except GitCommandError as e:
+            if os.path.exists(local_path):
+                import shutil
+                shutil.rmtree(local_path, ignore_errors=True)
+            logger.warning("Git clone failed: %s", scrub_text(e, limit=500))
+            raise AutoFixError(
+                "Git clone failed - check repository access and try again"
+            )
+
+    def _create_branch_and_commit(
+        self,
+        local_path: str,
+        file_path: str,
+        finding: VulnerabilityFinding,
+        branch: str,
+    ) -> str:
+        from git import Repo
+
+        repo = Repo(local_path)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        branch_name = f"{settings.auto_fix_branch_prefix}{finding.id[:12]}-{timestamp}"
+
+        new_branch = repo.create_head(branch_name)
+        new_branch.checkout()
+
+        commit_message = (
+            f"{settings.auto_fix_pr_title_prefix}{finding.title}\n\n"
+            f"Auto-generated fix for {finding.id}\n"
+            f"Severity: {finding.severity.value if hasattr(finding.severity, 'value') else finding.severity}\n"
+            f"File: {file_path}"
+        )
+
+        repo.index.add([file_path])
+        repo.index.commit(commit_message)
+
+        return branch_name
+
+    def _push_branch(
+        self,
+        local_path: str,
+        branch_name: str,
+        token: Optional[str],
+        repo_url: str,
+    ):
+        from git import Repo
+        from git.exc import GitCommandError
+
+        repo = Repo(local_path)
+        origin = repo.remote(name="origin")
+
+        push_url = repo_url
+        if token:
+            parsed = urlparse(repo_url)
+            if parsed.scheme.lower() in ("http", "https"):
+                push_url = f"https://{token}@{parsed.netloc}{parsed.path}"
+
+        try:
+            origin.push(refspec=f"{branch_name}:{branch_name}", push_url=push_url)
+        except GitCommandError as e:
+            logger.warning("Git push failed: %s", scrub_text(e, limit=500))
+            raise AutoFixError(
+                "Git push failed - check repository access and try again"
+            )
+
+    async def _create_pr(
+        self,
+        repo_url: str,
+        branch: str,
+        branch_name: str,
+        finding: VulnerabilityFinding,
+        token: Optional[str],
+        scan_report: ScanReport,
+        body_extra: str = "",
+    ) -> tuple:
+        if not token:
+            raise AutoFixError(
+                "No SCM token available - cannot create PR. "
+                "Set a per-project access_token."
+            )
+
+        platform = self._detect_platform(repo_url)
+        owner, repo_name = self._parse_repo_info(repo_url)
+
+        title = f"{settings.auto_fix_pr_title_prefix}{finding.title}"
+        body = (
+            f"## Auto-Generated Fix\n\n"
+            f"**Finding:** {finding.title}\n"
+            f"**Severity:** {finding.severity.value if hasattr(finding.severity, 'value') else finding.severity}\n"
+            f"**File:** `{finding.file_path}`\n"
+            f"**Description:** {finding.description or 'No description'}\n\n"
+            "---\n\n"
+            "This PR was automatically generated by ONYX Security Intelligence Platform."
+        )
+        if body_extra:
+            body = body + "\n\n" + body_extra
+
+        if platform == "github":
+            return await self._create_github_pr(
+                owner, repo_name, branch, branch_name, title, body, token
+            )
+        elif platform == "gitlab":
+            return await self._create_gitlab_pr(
+                repo_url, branch, branch_name, title, body, token
+            )
+        else:
+            raise AutoFixError(f"Unsupported SCM platform: {platform}")
+
+    def _detect_platform(self, repo_url: str) -> str:
+        host = (urlparse(repo_url).hostname or "").lower()
+        if host in ("github.com", "www.github.com"):
+            return "github"
+        elif host in ("gitlab.com", "www.gitlab.com"):
+            return "gitlab"
+        elif host == "bitbucket.org":
+            return "bitbucket"
+        raise AutoFixError("Unsupported SCM platform")
+
+    def _parse_repo_info(self, repo_url: str) -> tuple:
+        path = urlparse(repo_url).path.strip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        parts = path.split("/")
+        if len(parts) < 2:
+            raise AutoFixError("Could not parse repository owner/name from URL")
+        return parts[0], parts[1]
+
+    async def _create_github_pr(
+        self,
+        owner: str,
+        repo_name: str,
+        base_branch: str,
+        head_branch: str,
+        title: str,
+        body: str,
+        token: str,
+    ) -> tuple:
+        api_url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "onyx-security-platform",
+        }
+        payload = {
+            "title": title,
+            "head": head_branch,
+            "base": base_branch,
+            "body": body,
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, json=payload, headers=headers)
+
+        if response.status_code not in (201,):
+            logger.warning(
+                "GitHub PR creation failed (HTTP %s): %s",
+                response.status_code,
+                scrub_text(response.text, limit=500),
+            )
+            raise AutoFixError(
+                f"GitHub PR creation failed (HTTP {response.status_code})"
+            )
+
+        data = response.json()
+        return data.get("html_url", ""), data.get("number", 0)
+
+    async def _create_gitlab_pr(
+        self,
+        repo_url: str,
+        base_branch: str,
+        head_branch: str,
+        title: str,
+        body: str,
+        token: str,
+    ) -> tuple:
+        from urllib.parse import quote
+
+        full_path = urlparse(repo_url).path.strip("/")
+        if full_path.endswith(".git"):
+            full_path = full_path[:-4]
+        encoded_path = quote(full_path, safe="")
+
+        api_url = f"https://gitlab.com/api/v4/projects/{encoded_path}/merge_requests"
+        headers = {
+            "PRIVATE-TOKEN": token,
+            "User-Agent": "onyx-security-platform",
+        }
+        payload = {
+            "source_branch": head_branch,
+            "target_branch": base_branch,
+            "title": title,
+            "description": body,
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, json=payload, headers=headers)
+
+        if response.status_code not in (201,):
+            logger.warning(
+                "GitLab MR creation failed (HTTP %s): %s",
+                response.status_code,
+                scrub_text(response.text, limit=500),
+            )
+            raise AutoFixError(
+                f"GitLab MR creation failed (HTTP {response.status_code})"
+            )
+
+        data = response.json()
+        return data.get("web_url", ""), data.get("iid", 0)
+
+
+auto_fix_service = AutoFixService()

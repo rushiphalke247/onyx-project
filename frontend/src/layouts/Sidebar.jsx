@@ -2,10 +2,12 @@
  * Sidebar Component - Enterprise Glass Design
  * Matches the project's glass morphism and gradient design language
  */
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   XMarkIcon,
+  Bars3Icon,
   ChevronLeftIcon,
   ChevronRightIcon,
   HomeIcon,
@@ -13,12 +15,14 @@ import {
   DocumentChartBarIcon,
   ChartBarIcon,
   ShieldCheckIcon,
+  ShieldExclamationIcon,
   UsersIcon,
   Cog6ToothIcon,
   ClipboardDocumentListIcon,
   ClockIcon,
-  SparklesIcon,
   CpuChipIcon,
+  BeakerIcon,
+  ClockIcon as ClockIconSidebar,
 } from "@heroicons/react/24/outline";
 import { OnyxLogo } from "../components/common";
 import { useAuth } from "../components/auth";
@@ -36,7 +40,7 @@ const getNavigation = (user) => {
       name: "Projects",
       path: "/projects",
       icon: FolderIcon,
-      gradient: "from-violet-500 to-purple-500",
+      gradient: "from-cyan-500 to-violet-500",
     },
     {
       name: "Reports",
@@ -54,6 +58,18 @@ const getNavigation = (user) => {
       name: "Compliance",
       path: "/compliance",
       icon: ShieldCheckIcon,
+      gradient: "from-violet-500 to-cyan-500",
+    },
+    {
+      name: "Scheduled Scans",
+      path: "/scheduled-scans",
+      icon: ClockIconSidebar,
+      gradient: "from-amber-500 to-yellow-500",
+    },
+    {
+      name: "Secret History",
+      path: "/secret-history",
+      icon: ShieldExclamationIcon,
       gradient: "from-pink-500 to-rose-500",
     },
   ];
@@ -71,7 +87,7 @@ const getNavigation = (user) => {
       name: "Users",
       path: "/users",
       icon: UsersIcon,
-      gradient: "from-indigo-500 to-blue-500",
+      gradient: "from-cyan-500 to-violet-500",
     },
     {
       name: "Audit Logs",
@@ -84,6 +100,12 @@ const getNavigation = (user) => {
       path: "/retention-policies",
       icon: ClockIcon,
       gradient: "from-slate-500 to-gray-500",
+    },
+    {
+      name: "ML Dashboard",
+      path: "/admin/ml",
+      icon: BeakerIcon,
+      gradient: "from-violet-500 to-purple-500",
     },
   ];
 
@@ -110,25 +132,34 @@ const getNavigation = (user) => {
 /**
  * Navigation Item Component
  */
-const NavItem = ({ item, collapsed, onClick }) => {
+const NavItem = ({ item, collapsed, onClick, paths = [] }) => {
   const location = useLocation();
+  const hasMoreSpecificItem = paths.some(
+    (path) =>
+      path !== item.path &&
+      path.startsWith(item.path + "/") &&
+      (location.pathname === path || location.pathname.startsWith(path + "/"))
+  );
   const isActive =
     location.pathname === item.path ||
-    (item.path !== "/dashboard" && location.pathname.startsWith(item.path));
+    (item.path !== "/dashboard" &&
+      !hasMoreSpecificItem &&
+      location.pathname.startsWith(item.path + "/"));
   const Icon = item.icon;
 
   return (
     <NavLink
       to={item.path}
       onClick={onClick}
-      className="group relative block"
+      className="group relative block focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 rounded-xl min-h-[48px]"
       title={collapsed ? item.name : undefined}
+      aria-current={isActive ? "page" : null}
     >
-      {/* Active indicator */}
+      {/* Active indicator with animated glow */}
       {isActive && (
         <div
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-r-full 
-                       bg-gradient-to-b from-blue-500 to-purple-600 shadow-lg shadow-blue-500/50"
+          className="nav-active-glow absolute left-0 inset-y-0 my-auto w-1 h-8 rounded-r-full 
+                       bg-gradient-to-b from-cyan-500 to-violet-600 shadow-lg shadow-cyan-500/50"
         />
       )}
 
@@ -158,11 +189,7 @@ const NavItem = ({ item, collapsed, onClick }) => {
         </div>
 
         {!collapsed && (
-          <span
-            className={`text-sm font-medium transition-colors ${
-              isActive ? "text-white" : ""
-            }`}
-          >
+          <span className={`text-sm font-medium transition-colors ${isActive ? "text-white" : ""}`}>
             {item.name}
           </span>
         )}
@@ -210,6 +237,7 @@ const Logo = ({ collapsed }) => (
 const DesktopSidebar = ({ collapsed, onToggle }) => {
   const { user } = useAuth();
   const navigation = getNavigation(user);
+  const paths = navigation.map((item) => item.path);
 
   return (
     <aside
@@ -230,11 +258,24 @@ const DesktopSidebar = ({ collapsed, onToggle }) => {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-6 space-y-1">
-          {navigation.map((item, index) => (
-            <div key={item.path}>
+        <motion.nav
+          initial="hidden"
+          animate="visible"
+          variants={{
+            visible: { transition: { staggerChildren: 0.03 } },
+          }}
+          className="flex-1 overflow-y-auto py-6 flex flex-col gap-[3px]"
+        >
+          {navigation.map((item, _index) => (
+            <motion.div
+              key={item.path}
+              variants={{
+                hidden: { opacity: 0, x: -15 },
+                visible: { opacity: 1, x: 0 },
+              }}
+            >
               {item.separator && !collapsed && (
-                <div className="px-4 py-2 mt-4 mb-2">
+                <div className="px-4 pt-4 pb-2">
                   <div className="border-t border-gray-700/50" />
                   <span className="text-xs text-gray-500 uppercase tracking-wider mt-2 block">
                     Administration
@@ -242,24 +283,27 @@ const DesktopSidebar = ({ collapsed, onToggle }) => {
                 </div>
               )}
               {item.separator && collapsed && (
-                <div className="px-2 py-2 mt-4 mb-2">
+                <div className="px-2 py-2">
                   <div className="border-t border-gray-700/50" />
                 </div>
               )}
-              <NavItem item={item} collapsed={collapsed} />
-            </div>
+              <NavItem item={item} collapsed={collapsed} paths={paths} />
+            </motion.div>
           ))}
-        </nav>
+        </motion.nav>
 
         {/* Collapse Toggle */}
         <div className="p-4 border-t border-gray-800/50">
           <button
             onClick={onToggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
             className={`
-              w-full flex items-center gap-3 px-4 py-3 rounded-xl
+              w-full flex items-center gap-3 px-4 py-3 rounded-full
               text-gray-400 hover:text-white bg-gray-800/30 hover:bg-gray-800/50
               border border-gray-700/30 hover:border-gray-600/50
               transition-all duration-300
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900
               ${collapsed ? "justify-center" : ""}
             `}
           >
@@ -298,71 +342,103 @@ const MobileSidebar = ({ isOpen, onClose }) => {
 
   const { user } = useAuth();
   const navigation = getNavigation(user);
-
-  if (!isOpen) return null;
+  const paths = navigation.map((item) => item.path);
 
   return (
-    <div className="lg:hidden fixed inset-0 z-50">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="lg:hidden fixed inset-0 z-50"
+        >
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={onClose}
+          />
 
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-[280px]">
-        {/* Glass background */}
-        <div className="absolute inset-0 bg-gray-900/95 backdrop-blur-xl border-r border-gray-800/50 shadow-2xl" />
+          {/* Sidebar */}
+          <motion.aside
+            initial={{ x: -320 }}
+            animate={{ x: 0 }}
+            exit={{ x: -320 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="fixed left-0 top-0 h-full w-[280px]"
+          >
+            {/* Glass background */}
+            <div className="absolute inset-0 bg-gray-900/95 backdrop-blur-xl border-r border-gray-800/50 shadow-2xl" />
 
-        {/* Content */}
-        <div className="relative flex flex-col h-full">
-          {/* Header */}
-          <div className="h-16 flex items-center justify-between px-4 border-b border-gray-800/50">
-            <Logo collapsed={false} />
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-white bg-gray-800/50 
-                       hover:bg-gray-700/50 rounded-xl transition-colors"
-            >
-              <XMarkIcon className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto py-6 space-y-1">
-            {navigation.map((item) => (
-              <div key={item.path}>
-                {item.separator && (
-                  <div className="px-4 py-2 mt-4 mb-2">
-                    <div className="border-t border-gray-700/50" />
-                    <span className="text-xs text-gray-500 uppercase tracking-wider mt-2 block">
-                      Administration
-                    </span>
-                  </div>
-                )}
-                <NavItem item={item} collapsed={false} onClick={onClose} />
+            {/* Content */}
+            <div className="relative flex flex-col h-full">
+              {/* Header */}
+              <div className="h-16 flex items-center justify-between px-4 border-b border-gray-800/50">
+                <Logo collapsed={false} />
+                <button
+                  onClick={onClose}
+                  aria-label="Close navigation menu"
+                  className="lg:hidden p-2.5 text-gray-400 hover:text-white bg-gray-800/50
+                     hover:bg-gray-700/50 border border-gray-700/50 rounded-xl transition-all
+                     focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+                >
+                  <XMarkIcon className="w-5 h-5 lg:w-6 lg:h-6" />
+                </button>
               </div>
-            ))}
-          </nav>
 
-          {/* Footer */}
-          <div className="p-4 border-t border-gray-800/50">
-            <div
-              className="px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/5 to-violet-500/5 
+              {/* Navigation */}
+              <motion.nav
+                initial="hidden"
+                animate="visible"
+                variants={{
+                  visible: { transition: { staggerChildren: 0.04 } },
+                }}
+                className="flex-1 overflow-y-auto py-6 flex flex-col gap-[3px]"
+              >
+                {navigation.map((item) => (
+                  <motion.div
+                    key={item.path}
+                    variants={{
+                      hidden: { opacity: 0, x: -20 },
+                      visible: { opacity: 1, x: 0 },
+                    }}
+                  >
+                    {item.separator && (
+                      <div className="px-4 pt-4 pb-2">
+                        <div className="border-t border-gray-700/50" />
+                        <span className="text-xs text-gray-500 uppercase tracking-wider mt-2 block">
+                          Administration
+                        </span>
+                      </div>
+                    )}
+                    <NavItem item={item} collapsed={false} onClick={onClose} paths={paths} />
+                  </motion.div>
+                ))}
+              </motion.nav>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-gray-800/50">
+                <div
+                  className="px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/5 to-violet-500/5 
                           border border-cyan-500/20"
-            >
-              <p className="text-xs text-gray-400">
-                <span className="text-cyan-400 font-semibold tracking-wide">
-                  ONYX
-                </span>
-                <span className="text-gray-500"> • </span>
-                <span className="text-gray-500">v1.0</span>
-              </p>
+                >
+                  <p className="text-xs text-gray-400">
+                    <span className="text-cyan-400 font-semibold tracking-wide">ONYX</span>
+                    <span className="text-gray-500"> • </span>
+                    <span className="text-gray-500">v1.0</span>
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      </aside>
-    </div>
+          </motion.aside>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };
 
@@ -372,34 +448,19 @@ const MobileSidebar = ({ isOpen, onClose }) => {
 export const MobileMenuButton = ({ onClick }) => (
   <button
     onClick={onClick}
-    className="lg:hidden p-2.5 text-gray-400 hover:text-white bg-gray-800/50 
-             hover:bg-gray-700/50 border border-gray-700/50 rounded-xl transition-all"
+    aria-label="Open navigation menu"
+    className="lg:hidden p-2.5 text-gray-400 hover:text-white bg-gray-800/50
+             hover:bg-gray-700/50 border border-gray-700/50 rounded-xl transition-all
+             focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
   >
-    <svg
-      className="w-5 h-5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 6h16M4 12h16M4 18h16"
-      />
-    </svg>
+    <Bars3Icon className="w-5 h-5" />
   </button>
 );
 
 /**
  * Main Sidebar Export
  */
-export default function Sidebar({
-  collapsed,
-  onToggle,
-  mobileOpen,
-  onMobileClose,
-}) {
+export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }) {
   return (
     <>
       <DesktopSidebar collapsed={collapsed} onToggle={onToggle} />

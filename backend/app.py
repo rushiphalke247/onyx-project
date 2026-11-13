@@ -3,25 +3,23 @@ ONYX Security Intelligence Platform - Main FastAPI Application
 Production-ready application with MongoDB Atlas integration and realistic security scanning
 """
 import asyncio
-import os
-import sys
-import traceback
-from pathlib import Path
-from typing import List, Dict, Any
+import json
 import logging
+import os
+import shutil
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Request
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import uvicorn
-import json
-from dotenv import load_dotenv
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / '.env'
@@ -38,37 +36,51 @@ else:
         print(f"[WARN] No .env file found at: {env_path}")
 
 # Import database manager
-from database import db_manager, init_database, close_database
+# Import configuration
+from config import settings
+from database import close_database, db_manager, init_database
+from routes.admin import router as admin_router
+from routes.advanced_scanning import router as advanced_scanning_router
+from routes.advanced_security import router as advanced_security_router  # Consolidated security routes
+from routes.auth import router as auth_router
+from routes.compliance import router as compliance_router
+from routes.enterprise import router as enterprise_router
+from routes.enterprise_security import router as enterprise_security_router
+from routes.projects import router as projects_router
+
+# Import route modules
+from routes.ai_chat import router as ai_chat_router
+from routes.ai_investigate import router as ai_investigate_router
+from routes.ai_features import router as ai_features_router
+from routes.auto_fix import router as auto_fix_router
+from routes.finding_labels import router as finding_labels_router
+from routes.analytics import router as analytics_router
+from routes.reports import router as reports_router
+from routes.scanners import router as scanners_router
+from routes.security import router as security_router
+from routes.stats import router as stats_router
+from routes.users import router as users_router
+from routes.webhook import router as webhook_router
+from routes.triage import router as triage_router
+from routes.schedules import router as schedules_router
+from routes.secret_history import router as secret_history_router
+from routes.ml import router as ml_router
 
 # Import WebSocket manager for real-time notifications
 from services.notifications.websocket_manager import ws_manager
 
-# Import route modules
-from routes.reports import router as reports_router
-from routes.webhook import router as webhook_router
-from routes.auth import router as auth_router
-from routes.projects import router as projects_router
-from routes.users import router as users_router
-from routes.compliance import router as compliance_router
-from routes.security import router as security_router
-from routes.advanced_security import router as advanced_security_router  # Consolidated security routes
-from routes.advanced_scanning_fastapi import router as advanced_scanning_router
-from routes.enterprise import router as enterprise_router
-from routes.enterprise_security import router as enterprise_security_router
-from routes.admin import router as admin_router
-
 # Import centralized service registry
 from services.service_registry import ServiceRegistry
 
-# Import configuration
-from config import settings
+# Import scheduler service for lifespan management
+from services.scheduling.scheduler_service import ScanSchedulerService
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Rate limiter setup
-limiter = Limiter(key_func=get_remote_address)
+from utils.rate_limit import limiter
 
 # Lifespan context manager for startup/shutdown events
 @asynccontextmanager
@@ -77,7 +89,9 @@ async def lifespan(app: FastAPI):
     
     # Startup
     logger.info("🚀 Starting ONYX Security Intelligence Platform...")
-    await init_database()
+    db_result = await init_database()
+    if not db_result:
+        logger.error("⚠️ Database/Beanie initialization failed - auth endpoints will return 503")
     
     # Initialize all services via centralized registry (replaces duplicate initializations)
     try:
@@ -88,6 +102,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Service Registry initialization error: {e}")
     
+    # Initialize monitoring (Sentry + Prometheus)
+    try:
+        from services.infrastructure.monitoring import MonitoringService
+        monitoring = MonitoringService()
+        monitoring.init_sentry(settings.sentry_dsn, settings.environment)
+        if settings.enable_prometheus:
+            monitoring.init_prometheus(app)
+        app.state.monitoring = monitoring
+    except Exception as e:
+        logger.warning(f"⚠️ Monitoring initialization failed: {e}")
+
     # Start threat intelligence engine background tasks
     threat_intel = ServiceRegistry.get_threat_intelligence()
     if threat_intel and hasattr(threat_intel, 'start'):
@@ -96,6 +121,15 @@ async def lifespan(app: FastAPI):
             logger.info("🛡️ Threat Intelligence Engine background tasks started")
         except Exception as e:
             logger.warning(f"⚠️ Threat Intelligence Engine failed to start: {e}")
+    
+    # Start scan scheduler
+    scheduler_svc = ServiceRegistry.get_scan_scheduler()
+    if scheduler_svc:
+        try:
+            await scheduler_svc.start()
+            logger.info("⏰ Scan Scheduler started")
+        except Exception as e:
+            logger.warning(f"⚠️ Scan Scheduler failed to start: {e}")
     
     yield
     
@@ -124,6 +158,21 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return validation errors without echoing submitted secrets."""
+    errors = [
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
+app.add_middleware(SlowAPIMiddleware)
+
 # CORS settings from environment variables
 allowed_origins = settings.cors_origins_list
 
@@ -142,16 +191,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    # Rate-limit headers are not CORS-safelisted; cross-origin browsers
+    # (Vite dev server, split-domain prod) need them exposed to read
+    # Retry-After for the quota countdown.
+    expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
-# Handle OPTIONS requests explicitly
-@app.options("/{full_path:path}")
-async def options_handler():
-    return {"message": "OK"}
+# CORS middleware handles OPTIONS preflight requests itself,
+# so no catch-all OPTIONS route is registered here.
 
-# Include API routers with consistent /api/v1/ versioning
+# Include API routers with consistent /api/ prefixing
 # Core routes
 app.include_router(auth_router, prefix="/api")
 app.include_router(reports_router, prefix="/api/reports")
@@ -161,19 +212,32 @@ app.include_router(webhook_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")  # Admin dashboard and management
 
 # Security routes (consolidated)
-app.include_router(security_router)  # Core security: /api/security/*
-app.include_router(advanced_security_router)  # Advanced security: /api/v1/security/*
-app.include_router(advanced_scanning_router)  # Scanning: /api/advanced-scanning/*
+app.include_router(security_router, prefix="/api")
+app.include_router(advanced_security_router, prefix="/api")
+app.include_router(advanced_scanning_router, prefix="/api")
 
 # Compliance and Enterprise routes
-app.include_router(compliance_router, prefix="/api/compliance")
-app.include_router(enterprise_router)  # Enterprise features: /api/enterprise/*
-app.include_router(enterprise_security_router)  # Enterprise security: /api/v1/enterprise-security/*
+app.include_router(compliance_router, prefix="/api")
+app.include_router(enterprise_router, prefix="/api")
+app.include_router(enterprise_security_router, prefix="/api")
+
+# Analytics, scanners, stats
+app.include_router(auto_fix_router, prefix="/api")
+app.include_router(finding_labels_router, prefix="/api")
+app.include_router(ai_chat_router, prefix="/api")
+app.include_router(ai_investigate_router, prefix="/api")
+app.include_router(ai_features_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
+app.include_router(scanners_router, prefix="/api")
+app.include_router(stats_router, prefix="/api")
+app.include_router(triage_router, prefix="/api")
+app.include_router(schedules_router, prefix="/api")
+app.include_router(secret_history_router, prefix="/api")
+app.include_router(ml_router, prefix="/api")
 
 # Add trailing slash redirect middleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
+
 
 @app.middleware("http")
 async def redirect_trailing_slash(request: Request, call_next):
@@ -181,8 +245,8 @@ async def redirect_trailing_slash(request: Request, call_next):
     url = str(request.url)
     path = request.url.path
     
-    # Don't redirect API calls - let FastAPI handle them
-    if "/api/" in path or "/ws" in path or "/health" in path:
+    # Don't redirect API calls or root - let FastAPI handle them
+    if path == "/" or "/api/" in path or "/ws" in path or "/health" in path:
         response = await call_next(request)
         return response
     
@@ -212,163 +276,6 @@ async def limit_request_body_size(request: Request, call_next):
             pass  # Invalid content-length header, let FastAPI handle it
     
     return await call_next(request)
-
-@app.get("/api/analytics/overview")
-async def get_analytics_overview(days_back: int = 30):
-    """Get analytics overview from database - fetches real scan data"""
-    try:
-        from database import db_manager
-        from datetime import timedelta
-        from models.report import ScanReport, ScanStatus
-        
-        if db_manager.db is None:
-            raise Exception("Database not connected")
-        
-        # Calculate cutoff date
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
-        
-        # Fetch reports from scan_reports collection using Beanie
-        reports = await ScanReport.find(
-            ScanReport.created_at >= cutoff_date
-        ).to_list()
-        
-        # Calculate analytics
-        total_scans = len(reports)
-        completed_scans = len([r for r in reports if r.status == ScanStatus.COMPLETED])
-        failed_scans = len([r for r in reports if r.status == ScanStatus.FAILED])
-        
-        # Aggregate findings by severity
-        vulnerability_summary = {
-            "critical": sum(r.findings_by_severity.get("critical", 0) for r in reports),
-            "high": sum(r.findings_by_severity.get("high", 0) for r in reports),
-            "medium": sum(r.findings_by_severity.get("medium", 0) for r in reports),
-            "low": sum(r.findings_by_severity.get("low", 0) for r in reports),
-            "info": sum(r.findings_by_severity.get("info", 0) for r in reports)
-        }
-        
-        # Scanner performance
-        scanner_performance = {}
-        for report in reports:
-            for scan_result in report.scan_results:
-                scanner = scan_result.scanner.value if hasattr(scan_result.scanner, 'value') else str(scan_result.scanner)
-                if scanner not in scanner_performance:
-                    scanner_performance[scanner] = {
-                        "total_runs": 0,
-                        "successful_runs": 0,
-                        "total_findings": 0,
-                        "avg_duration": 0,
-                        "total_duration": 0
-                    }
-                
-                scanner_performance[scanner]["total_runs"] += 1
-                if scan_result.status == ScanStatus.COMPLETED:
-                    scanner_performance[scanner]["successful_runs"] += 1
-                    scanner_performance[scanner]["total_findings"] += len(scan_result.findings)
-                    if scan_result.duration_seconds:
-                        scanner_performance[scanner]["total_duration"] += scan_result.duration_seconds
-        
-        # Calculate average durations
-        for scanner, stats in scanner_performance.items():
-            if stats["successful_runs"] > 0:
-                stats["avg_duration"] = stats["total_duration"] / stats["successful_runs"]
-            del stats["total_duration"]  # Remove temporary field
-        
-        # Top projects by findings
-        project_findings = {}
-        for report in reports:
-            project = report.project_name
-            if project not in project_findings:
-                project_findings[project] = {
-                    "project_name": project,
-                    "total_findings": 0,
-                    "scans_count": 0,
-                    "critical_findings": 0,
-                    "high_findings": 0
-                }
-            
-            project_findings[project]["total_findings"] += report.total_findings
-            project_findings[project]["scans_count"] += 1
-            project_findings[project]["critical_findings"] += report.findings_by_severity.get("critical", 0)
-            project_findings[project]["high_findings"] += report.findings_by_severity.get("high", 0)
-        
-        # Sort top projects by total findings
-        top_projects = sorted(
-            project_findings.values(),
-            key=lambda x: x["total_findings"],
-            reverse=True
-        )[:10]
-        
-        return {
-            "period": {
-                "days_back": days_back,
-                "start_date": cutoff_date.isoformat(),
-                "end_date": datetime.now(timezone.utc).isoformat()
-            },
-            "scan_summary": {
-                "total_scans": total_scans,
-                "completed_scans": completed_scans,
-                "failed_scans": failed_scans,
-                "success_rate": (completed_scans / total_scans * 100) if total_scans > 0 else 0
-            },
-            "vulnerability_summary": vulnerability_summary,
-            "scanner_performance": scanner_performance,
-            "top_projects": top_projects
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting analytics: {e}")
-        logger.error(f"Analytics error traceback: {traceback.format_exc()}")
-        # Return empty analytics on error
-        return {
-            "period": {"days_back": days_back},
-            "scan_summary": {
-                "total_scans": 0,
-                "completed_scans": 0,
-                "failed_scans": 0,
-                "success_rate": 0
-            },
-            "vulnerability_summary": {
-                "critical": 0,
-                "high": 0,
-                "medium": 0,
-                "low": 0,
-                "info": 0
-            },
-            "scanner_performance": {},
-            "top_projects": []
-        }
-
-# Pydantic models
-class ScanRequest(BaseModel):
-    repository_url: str
-    branch: str = "main"
-    scan_types: List[str] = ["sast", "container", "secrets", "infrastructure"]
-    access_token: str = None  # Optional access token for private repositories
-
-class ScanStatus(BaseModel):
-    scan_id: str
-    status: str
-    progress: int
-    message: str
-
-class FindingModel(BaseModel):
-    id: str
-    severity: str
-    title: str
-    description: str
-    file_path: str
-    line_number: int
-    scanner: str
-
-class ReportModel(BaseModel):
-    id: str
-    project_name: str
-    repository_url: str
-    branch: str
-    status: str
-    findings_count: int
-    created_at: str
-    findings: List[FindingModel]
 
 @app.get("/")
 async def root():
@@ -465,9 +372,13 @@ async def health_check():
     ]
     
     for scanner_name, _ in scanner_checks:
-        # For now, mark as available (actual check would verify binary exists)
+        # Verify scanner is both enabled AND actually installed on the system
         if settings.__dict__.get(f"enable_{scanner_name}", True):
-            available_scanners.append(scanner_name)
+            scanner_path = getattr(settings, f"{scanner_name}_path", scanner_name)
+            if shutil.which(scanner_path):
+                available_scanners.append(scanner_name)
+            else:
+                warnings.append(f"Scanner '{scanner_name}' is enabled but not found in PATH")
     
     health_data["scanners"]["available"] = available_scanners
     health_data["scanners"]["active"] = len(available_scanners) if health_data["database"]["connected"] else 0
@@ -500,7 +411,7 @@ async def get_public_stats():
                 "total_scans": 0,
                 "total_vulnerabilities": 0,
                 "total_users": 0,
-                "uptime_percentage": 99.9
+                "uptime_percentage": None
             }
         
         # Get real counts from database
@@ -517,7 +428,7 @@ async def get_public_stats():
             "total_scans": total_scans,
             "total_vulnerabilities": total_vulnerabilities,
             "total_users": total_users,
-            "uptime_percentage": 99.9  # Could be calculated from health monitoring
+            "uptime_percentage": None  # Requires external monitoring (e.g., UptimeRobot, Betterstack)
         }
         
     except Exception as e:
@@ -526,96 +437,14 @@ async def get_public_stats():
             "total_scans": 0,
             "total_vulnerabilities": 0,
             "total_users": 0,
-            "uptime_percentage": 99.9
+            "uptime_percentage": None
         }
-
-
-async def _check_scanner_availability(scanner_name: str, command: List[str]) -> Dict[str, Any]:
-    """Check if a scanner is available and get its version."""
-    import asyncio
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
-        
-        if process.returncode == 0:
-            version = stdout.decode().strip().split('\n')[0] if stdout else "unknown"
-            # Extract version number from output
-            import re
-            version_match = re.search(r'[\d]+\.[\d]+\.[\d]+', version)
-            version = version_match.group(0) if version_match else version[:50]
-            return {"status": "available", "version": version}
-        else:
-            return {"status": "unavailable", "version": "N/A", "error": "Command failed"}
-    except asyncio.TimeoutError:
-        return {"status": "unavailable", "version": "N/A", "error": "Timeout"}
-    except FileNotFoundError:
-        return {"status": "not_installed", "version": "N/A", "error": "Scanner not found in PATH"}
-    except Exception as e:
-        return {"status": "error", "version": "N/A", "error": str(e)}
-
-
-@app.get("/api/scanners/health")
-async def get_scanners_health():
-    """Get actual scanner health status by checking each scanner's availability."""
-    import asyncio
-    
-    # Define scanner check commands
-    scanner_checks = {
-        "semgrep": ["semgrep", "--version"],
-        "trivy": ["trivy", "--version"],
-        "gitleaks": ["gitleaks", "version"],
-        "bandit": ["bandit", "--version"],
-        "safety": ["safety", "--version"],
-    }
-    
-    # Check all scanners in parallel
-    results = {}
-    tasks = []
-    scanner_names = []
-    
-    for name, command in scanner_checks.items():
-        tasks.append(_check_scanner_availability(name, command))
-        scanner_names.append(name)
-    
-    check_results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    available_count = 0
-    for name, result in zip(scanner_names, check_results):
-        if isinstance(result, Exception):
-            results[name] = {"status": "error", "version": "N/A", "error": str(result)}
-        else:
-            results[name] = result
-            if result.get("status") == "available":
-                available_count += 1
-    
-    # Determine overall status
-    total_scanners = len(scanner_checks)
-    if available_count == total_scanners:
-        overall_status = "healthy"
-    elif available_count >= total_scanners // 2:
-        overall_status = "degraded"
-    elif available_count > 0:
-        overall_status = "limited"
-    else:
-        overall_status = "unavailable"
-    
-    return {
-        "scanners": results,
-        "overall_status": overall_status,
-        "available_count": available_count,
-        "total_count": total_scanners,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=None)):
     """
     WebSocket endpoint for real-time updates.
-    Supports optional authentication via token query parameter.
+    Requires a valid access token; anonymous connections are rejected.
     """
     client_host = websocket.client.host if websocket.client else "unknown"
     logger.info(f"WebSocket connection attempt from {client_host}")
@@ -631,6 +460,11 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=No
                 logger.info(f"WebSocket authenticated for user: {user_id}")
         except Exception as auth_error:
             logger.warning(f"WebSocket token verification failed: {auth_error}")
+    
+    if not user_id:
+        logger.info(f"Rejecting unauthenticated WebSocket connection from {client_host}")
+        await websocket.close(code=1008, reason="Authentication required")
+        return
     
     try:
         # Connect using the WebSocket manager

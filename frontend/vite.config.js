@@ -64,10 +64,14 @@ export default defineConfig(({ mode }) => {
       minify: "esbuild",
       rollupOptions: {
         output: {
-          manualChunks: {
-            vendor: ["react", "react-dom"],
-            charts: ["recharts"],
-            ui: ["@headlessui/react", "@heroicons/react"],
+          manualChunks(id) {
+            if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) return "vendor";
+            if (id.includes("node_modules/html2canvas") || id.includes("node_modules/jspdf") || id.includes("node_modules/html2pdf")) return "pdf-libs";
+            if (id.includes("node_modules/recharts")) return "charts";
+            if (id.includes("node_modules/framer-motion")) return "motion";
+            if (id.includes("node_modules/@tanstack/react-query")) return "query";
+            if (id.includes("node_modules/@headlessui") || id.includes("node_modules/@heroicons")) return "ui";
+            if (id.includes("ReportDetails") || id.includes("ReportCharts") || id.includes("AISection")) return "report-details";
           },
         },
       },

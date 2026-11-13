@@ -27,8 +27,15 @@ env/
 *.log
 logs/
 
-# FastAPI/Uvicorn cache
+# Test artifacts and caches
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+wheels/
+vendor/
 
 # IDE files
 .vscode/
@@ -46,3 +53,11 @@ uploads/
 # Security scanner results (if saved locally)
 scan-results/
 security-reports/
+
+# Runtime output
+output.txt
+data/policies/policy_repo/
+
+# ML model artifacts (generated at runtime)
+ml_models/
+*.pkl

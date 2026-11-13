@@ -2,9 +2,9 @@
 User Models for ONYX Security Intelligence Platform
 Handles user authentication, roles, and profile management
 """
-from datetime import datetime, timedelta, timezone
-from typing import Optional, List
 import uuid
+from datetime import datetime, timezone
+from typing import List, Optional
 
 from beanie import Document, Indexed
 from pydantic import BaseModel, EmailStr, Field, validator
@@ -12,6 +12,7 @@ from pymongo import IndexModel
 
 # Import shared enums and utilities from the single source of truth
 from .base import UserRole, UserStatus, utc_now
+from utils.datetime_utils import ensure_utc
 
 
 class User(Document):
@@ -25,6 +26,7 @@ class User(Document):
     
     # Authentication
     hashed_password: str
+    auth_provider: str = "password"  # "password" or "google" (SSO-created accounts)
     role: UserRole = UserRole.VIEWER
     status: UserStatus = UserStatus.PENDING_VERIFICATION
     
@@ -59,6 +61,9 @@ class User(Document):
         "product_updates": False,
         "marketing": False
     })
+
+    # User settings (security, notifications, scanning, API preferences)
+    settings: dict = Field(default_factory=dict)
     
     # Permissions & Projects
     project_permissions: List[str] = Field(default_factory=list)  # Project IDs user has access to
@@ -122,7 +127,7 @@ class User(Document):
     
     def is_account_locked(self) -> bool:
         """Check if account is locked due to failed attempts"""
-        if self.locked_until and self.locked_until > datetime.now(timezone.utc):
+        if self.locked_until and ensure_utc(self.locked_until) > datetime.now(timezone.utc):
             return True
         return False
     
@@ -211,6 +216,22 @@ class APIToken(Document):
             IndexModel([("expires_at", 1)]),
             IndexModel([("created_at", -1)]),
         ]
+
+
+class SsoNonce(Document):
+    """Server-issued, single-use nonce for Google SSO login.
+
+    Issued by GET /auth/sso/google/config, embedded in the Google ID token via
+    the GSI `nonce` option, then verified and consumed by POST /auth/sso/google.
+    A Mongo TTL index expires records 10 minutes after issuance.
+    """
+
+    nonce: Indexed(str, unique=True)
+    expires_at: datetime
+    used: bool = False
+
+    class Settings:
+        name = "sso_nonces"
 
 
 # Pydantic Models for API Requests/Responses

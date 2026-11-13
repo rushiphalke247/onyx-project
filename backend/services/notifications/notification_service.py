@@ -3,9 +3,8 @@ Notification Service for Security Scanning Platform
 Handles sending notifications for scan events and security alerts
 """
 import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from utils.datetime_utils import utc_now
 
@@ -83,14 +82,14 @@ class NotificationService:
                 "message": f"Security scan started for project '{project_name}'"
             }
             
-            logger.info(f"📬 Scan started notification: {notification_data}")
+            logger.info(f"Scan started notification: {notification_data}")
+
+            await self._send_slack_teams(scan_id)
             
-            # For now, just log the notification
-            # In production, you would integrate with actual notification services
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to send scan started notification: {e}")
+            logger.error(f"Failed to send scan started notification: {e}")
             return False
     
     async def send_scan_completed(
@@ -105,7 +104,8 @@ class NotificationService:
         low_count: int = 0,
         scan_type: str = "Security",
         duration: str = "N/A",
-        files_scanned: int = 0
+        files_scanned: int = 0,
+        detailed_findings: Optional[List[Dict]] = None
     ) -> bool:
         """Send notification when a scan completes"""
         try:
@@ -123,6 +123,19 @@ class NotificationService:
             
             logger.info(f"✅ Scan completed notification: {notification_data}")
             
+            # Generate PDF report attachment (same PDF as the Download PDF button)
+            pdf_content = None
+            try:
+                from utils.pdf_generator import generate_report_pdf
+                pdf_bytes = await generate_report_pdf(scan_id)
+                if pdf_bytes:
+                    pdf_content = pdf_bytes
+                    logger.info(f"📄 PDF report generated for email attachment ({len(pdf_bytes)} bytes)")
+                else:
+                    logger.warning(f"PDF generation returned None for scan {scan_id}")
+            except Exception as pdf_err:
+                logger.warning(f"Failed to generate PDF report attachment: {pdf_err}")
+            
             # Send email notification if enabled
             if NotificationChannel.EMAIL in self.enabled_channels:
                 prefs = await self._get_user_notification_preferences(user_id)
@@ -130,7 +143,10 @@ class NotificationService:
                     email = await self._get_user_email(user_id)
                     if email:
                         try:
-                            from services.notifications.email_service import email_service
+                            from services.notifications.service import email_service
+                            attachments = None
+                            if pdf_content:
+                                attachments = [{"filename": f"scan_report_{scan_id[:8]}.pdf", "content": pdf_content, "content_type": "application/pdf"}]
                             await email_service.send_scan_completed_email(
                                 email=email,
                                 project_name=project_name,
@@ -141,11 +157,16 @@ class NotificationService:
                                 low_count=low_count,
                                 duration=duration,
                                 files_scanned=files_scanned,
-                                report_id=scan_id
+                                report_id=scan_id,
+                                attachments=attachments,
+                                detailed_findings=detailed_findings
                             )
                             logger.info(f"📧 Scan completion email sent to {email}")
                         except Exception as email_error:
                             logger.warning(f"Failed to send scan email: {email_error}")
+            
+            # Send Slack/Teams notification
+            await self._send_slack_teams(scan_id)
             
             # For critical findings, also send alert
             if critical_count > 0:
@@ -178,11 +199,14 @@ class NotificationService:
                 "message": f"Security scan failed for project '{project_name}'"
             }
             
-            logger.error(f"💥 Scan failed notification: {notification_data}")
+            logger.error(f"Scan failed notification: {notification_data}")
+
+            await self._send_slack_teams(scan_id)
+            
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to send scan failed notification: {e}")
+            logger.error(f"Failed to send scan failed notification: {e}")
             return False
     
     async def send_critical_vulnerability_alert(
@@ -205,7 +229,9 @@ class NotificationService:
                 "message": f"🚨 CRITICAL ALERT: {critical_count} critical vulnerabilities found in '{project_name}'"
             }
             
-            logger.warning(f"🚨 Critical vulnerability alert: {notification_data}")
+            logger.warning(f"Critical vulnerability alert: {notification_data}")
+
+            await self._send_slack_teams(scan_id)
             
             # Send email alert for critical vulnerabilities
             if NotificationChannel.EMAIL in self.enabled_channels:
@@ -214,7 +240,7 @@ class NotificationService:
                     email = await self._get_user_email(user_id)
                     if email:
                         try:
-                            from services.notifications.email_service import email_service
+                            from services.notifications.service import email_service
                             details = vulnerability_details or {}
                             await email_service.send_security_alert_email(
                                 email=email,
@@ -350,7 +376,7 @@ class NotificationService:
                     email = await self._get_user_email(user_id)
                     if email:
                         try:
-                            from services.notifications.email_service import email_service
+                            from services.notifications.service import email_service
                             await email_service.send_login_alert_email(
                                 email=email,
                                 login_time=login_time,
@@ -404,7 +430,7 @@ class NotificationService:
                         email = await self._get_user_email(user_id)
                         if email:
                             try:
-                                from services.notifications.email_service import email_service
+                                from services.notifications.service import email_service
                                 await email_service.send_new_vulnerability_email(
                                     email=email,
                                     vulnerability_title=vulnerability_title,
@@ -426,6 +452,38 @@ class NotificationService:
             logger.error(f"❌ Failed to send vulnerability notification: {e}")
             return False
     
+    async def _load_scan_report(self, scan_id: str):
+        """Load ScanReport from database by scan_id"""
+        try:
+            from models.report import ScanReport
+            return await ScanReport.find_one(ScanReport.scan_id == scan_id)
+        except Exception as e:
+            logger.warning(f"Could not load scan report {scan_id}: {e}")
+            return None
+
+    async def _send_slack_teams(self, scan_id: str):
+        """Send notification to Slack and Teams channels if configured"""
+        try:
+            from services.notifications.notifier import notification_service as notifier_svc
+            report = await self._load_scan_report(scan_id)
+            if report:
+                await notifier_svc.send_scan_notification(report)
+        except Exception as e:
+            logger.warning(f"Slack/Teams notification failed: {e}")
+
+    async def send_scan_notification(self, scan_report) -> bool:
+        """Send notification for a completed scan report via all configured channels.
+        
+        Delegates to notifier_service for Slack/Teams dispatch.
+        """
+        try:
+            from services.notifications.notifier import notification_service as notifier_svc
+            status = await notifier_svc.send_scan_notification(scan_report)
+            return status.slack_sent or status.teams_sent
+        except Exception as e:
+            logger.error(f"Failed to send scan notification: {e}")
+            return False
+
     def configure_channels(self, channels: List[NotificationChannel]):
         """Configure enabled notification channels"""
         self.enabled_channels = channels

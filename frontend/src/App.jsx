@@ -2,22 +2,17 @@
  * ONYX Security Intelligence Platform - Main Application Entry
  * Clean, modular architecture with separated concerns
  */
-import React, { useEffect, useState } from "react";
-import {
-  BrowserRouter as Router,
-  Routes,
-  Route,
-  Navigate,
-  useLocation,
-} from "react-router-dom";
+import { useState } from "react";
+import { BrowserRouter as Router, Navigate, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MotionConfig } from "framer-motion";
 import { Toaster } from "react-hot-toast";
 import { ShieldCheckIcon } from "@heroicons/react/24/outline";
 
 // Core Components
 import { AuthProvider, useAuth, AuthRoutingHandler } from "./components/auth";
 import { MainLayout } from "./layouts";
-import { LandingPage } from "./components/marketing";
+
 import ErrorBoundary from "./components/common/ErrorBoundary";
 
 // Create QueryClient with enhanced settings
@@ -26,7 +21,7 @@ const queryClient = new QueryClient({
     queries: {
       retry: 3,
       staleTime: 5 * 60 * 1000,
-      cacheTime: 10 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
       refetchOnWindowFocus: false,
       refetchInterval: 30000,
     },
@@ -63,28 +58,11 @@ function AppContent() {
   // Auth routes - redirect to dashboard if already logged in
   const authRoutes = ["/login", "/register"];
   const isAuthRoute = authRoutes.some(
-    (route) =>
-      location.pathname === route || location.pathname.startsWith(route)
+    (route) => location.pathname === route || location.pathname.startsWith(route)
   );
 
   // Public routes that don't require authentication
-  const publicRoutes = [
-    "/",
-    "/landing",
-    "/login",
-    "/register",
-    "/reset-password",
-    "/verify-email",
-    "/legal",
-    "/terms",
-    "/about",
-    "/docs",
-  ];
-  const isPublicRoute = publicRoutes.some(
-    (route) =>
-      location.pathname === route || location.pathname.startsWith(route)
-  );
-
+  const _publicRoutes = ["/verify-email", "/legal", "/terms", "/about", "/docs"];
   // If authenticated and on auth route (login/register), redirect to dashboard
   if (isAuthenticated && isAuthRoute) {
     return <Navigate to="/dashboard" replace />;
@@ -96,12 +74,7 @@ function AppContent() {
   }
 
   // If not authenticated, handle public routes or show auth modal
-  return (
-    <AuthRoutingHandler
-      authModalOpen={authModalOpen}
-      setAuthModalOpen={setAuthModalOpen}
-    />
-  );
+  return <AuthRoutingHandler authModalOpen={authModalOpen} setAuthModalOpen={setAuthModalOpen} />;
 }
 
 /**
@@ -112,44 +85,46 @@ function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <Router>
-            <AppContent />
-          </Router>
-        </AuthProvider>
+        <MotionConfig reducedMotion="user">
+          <AuthProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </AuthProvider>
 
-        {/* Global Toast Notifications */}
-        <Toaster
-          position="top-right"
-          reverseOrder={false}
-          gutter={8}
-          containerStyle={{ zIndex: 9999 }}
-          toastOptions={{
-            duration: 4000,
-            style: {
-              background:
-                "linear-gradient(135deg, rgba(17, 24, 39, 0.95) 0%, rgba(31, 41, 55, 0.95) 100%)",
-              color: "#fff",
-              border: "1px solid rgba(75, 85, 99, 0.3)",
-              borderRadius: "1rem",
-              backdropFilter: "blur(16px)",
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-              maxWidth: "500px",
-            },
-            success: {
-              duration: 3000,
-              iconTheme: { primary: "#10b981", secondary: "#fff" },
-            },
-            error: {
-              duration: 5000,
-              iconTheme: { primary: "#ef4444", secondary: "#fff" },
-            },
-            loading: {
-              duration: Infinity,
-              iconTheme: { primary: "#3b82f6", secondary: "#fff" },
-            },
-          }}
-        />
+          {/* Global Toast Notifications */}
+          <Toaster
+            position="top-right"
+            reverseOrder={false}
+            gutter={8}
+            containerStyle={{ zIndex: 9999 }}
+            toastOptions={{
+              duration: 4000,
+              style: {
+                background:
+                  "linear-gradient(135deg, rgba(17, 24, 39, 0.95) 0%, rgba(31, 41, 55, 0.95) 100%)",
+                color: "#fff",
+                border: "1px solid rgba(75, 85, 99, 0.3)",
+                borderRadius: "1rem",
+                backdropFilter: "blur(16px)",
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                maxWidth: "500px",
+              },
+              success: {
+                duration: 3000,
+                iconTheme: { primary: "#10b981", secondary: "#fff" },
+              },
+              error: {
+                duration: 5000,
+                iconTheme: { primary: "#ef4444", secondary: "#fff" },
+              },
+              loading: {
+                duration: Infinity,
+                iconTheme: { primary: "#06b6d4", secondary: "#fff" },
+              },
+            }}
+          />
+        </MotionConfig>
       </QueryClientProvider>
     </ErrorBoundary>
   );

@@ -6,21 +6,22 @@ NOTE: This module uses SQLite for CVE/threat caching.
 Future versions should migrate to MongoDB for consistency.
 """
 import asyncio
-import aiohttp
+import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Set
-from pathlib import Path
-from dataclasses import dataclass, field
-import hashlib
-import gzip
 import sqlite3
-from urllib.parse import urljoin
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import ssl
+
+import aiohttp
 
 # Import canonical enums from models.base (SINGLE SOURCE OF TRUTH)
-from models.base import ThreatSeverity, ThreatType, ThreatSource
+from models.base import ThreatSeverity, ThreatSource, ThreatType
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,11 @@ class ThreatIntelligenceEngine:
             raise
     
     async def start(self):
-        """Start threat intelligence engine"""
+        """Start threat intelligence engine (idempotent)"""
+        if getattr(self, '_started', False):
+            logger.debug("Threat intelligence engine already started, skipping")
+            return
+        
         try:
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
@@ -235,6 +240,7 @@ class ThreatIntelligenceEngine:
             asyncio.create_task(self._threat_feed_updater())
             asyncio.create_task(self._alert_monitor())
             
+            self._started = True
             logger.info("Threat intelligence engine started")
             
         except Exception as e:
@@ -285,6 +291,11 @@ class ThreatIntelligenceEngine:
             return
         
         try:
+            # Create SSL context tolerant of expired certs (NVD cert expired as of Jul 2026)
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+            
             # Get recent CVEs (last 7 days)
             end_date = datetime.now(timezone.utc)
             start_date = end_date - timedelta(days=7)
@@ -299,7 +310,7 @@ class ThreatIntelligenceEngine:
             if config.get("api_key"):
                 headers["apiKey"] = config["api_key"]
             
-            async with self.session.get(config["url"], params=params, headers=headers) as response:
+            async with self.session.get(config["url"], params=params, headers=headers, ssl=ssl_ctx) as response:
                 if response.status == 200:
                     data = await response.json()
                     cves = data.get("vulnerabilities", [])
@@ -572,10 +583,7 @@ class ThreatIntelligenceEngine:
             description = advisory.get("description", summary)
             
             # Parse severity
-            severity_str = advisory.get("severity", "medium")
-            if not isinstance(severity_str, str):
-                severity_str = "medium"
-            severity_str = severity_str.lower()
+            severity_str = advisory.get("severity", "medium").lower()
             severity_map = {
                 "critical": ThreatSeverity.CRITICAL,
                 "high": ThreatSeverity.HIGH,
@@ -584,7 +592,7 @@ class ThreatIntelligenceEngine:
             }
             severity = severity_map.get(severity_str, ThreatSeverity.MEDIUM)
             
-            # Parse CVSS — guard against string values
+            # Parse CVSS (sometimes returned as string "NONE" instead of dict)
             cvss = advisory.get("cvss", {})
             if not isinstance(cvss, dict):
                 cvss = {}
@@ -595,43 +603,36 @@ class ThreatIntelligenceEngine:
             published_date = datetime.fromisoformat(advisory.get("published_at", "").replace("Z", "+00:00"))
             updated_date = datetime.fromisoformat(advisory.get("updated_at", "").replace("Z", "+00:00"))
             
-            # Parse affected packages — guard against string list items
+            # Parse affected packages
             affected_products = []
             vulnerabilities = advisory.get("vulnerabilities", [])
-            if not isinstance(vulnerabilities, list):
-                vulnerabilities = []
-            for vuln in vulnerabilities:
-                if not isinstance(vuln, dict):
-                    continue
-                package = vuln.get("package", {})
-                if not isinstance(package, dict):
-                    continue
-                ecosystem = package.get("ecosystem", "")
-                name = package.get("name", "")
-                if ecosystem and name:
-                    affected_products.append(f"{ecosystem}:{name}")
+            if isinstance(vulnerabilities, list):
+                for vuln in vulnerabilities:
+                    if not isinstance(vuln, dict):
+                        continue
+                    package = vuln.get("package", {})
+                    if not isinstance(package, dict):
+                        continue
+                    ecosystem = package.get("ecosystem", "")
+                    name = package.get("name", "")
+                    if ecosystem and name:
+                        affected_products.append(f"{ecosystem}:{name}")
             
-            # Parse references — guard against string list items
+            # Parse references
             references = []
             ref_list = advisory.get("references", [])
-            if not isinstance(ref_list, list):
-                ref_list = []
-            for ref in ref_list:
-                if isinstance(ref, dict):
-                    references.append(ref.get("url", ""))
-                elif isinstance(ref, str):
-                    references.append(ref)
+            if isinstance(ref_list, list):
+                for ref in ref_list:
+                    if isinstance(ref, dict):
+                        references.append(ref.get("url", ""))
             
-            # Parse CWEs — guard against string list items
+            # Parse CWEs
             cwe_ids = []
             cwes = advisory.get("cwes", [])
-            if not isinstance(cwes, list):
-                cwes = []
-            for cwe in cwes:
-                if isinstance(cwe, dict):
-                    cwe_ids.append(cwe.get("cwe_id", ""))
-                elif isinstance(cwe, str):
-                    cwe_ids.append(cwe)
+            if isinstance(cwes, list):
+                for cwe in cwes:
+                    if isinstance(cwe, dict):
+                        cwe_ids.append(cwe.get("cwe_id", ""))
             
             return CVEData(
                 cve_id=cve_id,
@@ -649,7 +650,6 @@ class ThreatIntelligenceEngine:
         except Exception as e:
             logger.error(f"Failed to parse GitHub Advisory: {e}")
             return None
-
     
     async def _store_cve(self, cve_data: CVEData):
         """Store CVE data in database"""
@@ -696,15 +696,25 @@ class ThreatIntelligenceEngine:
             logger.error(f"Failed to update KEV status for {cve_id}: {e}")
     
     async def _create_kev_alert(self, vuln: Dict[str, Any]):
-        """Create alert for new CISA KEV entry"""
+        """Create alert for new CISA KEV entry (skips duplicates)"""
         try:
             cve_id = vuln.get("cveID", "")
             vendor_project = vuln.get("vendorProject", "")
             product = vuln.get("product", "")
             vulnerability_name = vuln.get("vulnerabilityName", "")
             
+            alert_id = f"kev_{cve_id}_{hashlib.md5(cve_id.encode()).hexdigest()[:8]}"
+            
+            # Skip if alert already exists (dedup across feed cycles)
+            with sqlite3.connect(self.threat_db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT 1 FROM threat_alerts WHERE alert_id = ?", (alert_id,)
+                )
+                if cursor.fetchone():
+                    return
+            
             alert = ThreatAlert(
-                alert_id=f"kev_{cve_id}_{hashlib.md5(cve_id.encode()).hexdigest()[:8]}",
+                alert_id=alert_id,
                 threat_type=ThreatType.CVE,
                 severity=ThreatSeverity.HIGH,
                 title=f"CISA KEV Alert: {cve_id}",
@@ -1030,65 +1040,6 @@ class ThreatIntelligenceEngine:
             logger.error(f"Failed to search CVEs: {e}")
             return []
     
-    async def get_active_alerts(
-        self,
-        threat_type: Optional[ThreatType] = None,
-        severity: Optional[ThreatSeverity] = None,
-        limit: int = 100
-    ) -> List[ThreatAlert]:
-        """Get active threat alerts"""
-        try:
-            conditions = ["resolved = 0"]
-            params = []
-            
-            if threat_type:
-                conditions.append("threat_type = ?")
-                params.append(threat_type.value)
-            
-            if severity:
-                conditions.append("severity = ?")
-                params.append(severity.value)
-            
-            where_clause = f"WHERE {' AND '.join(conditions)}"
-            
-            query_sql = f"""
-            SELECT alert_id, threat_type, severity, title, description, source,
-                   indicators, matched_patterns, affected_repositories,
-                   created_at, expires_at, actionable, metadata FROM threat_alerts
-            {where_clause}
-            ORDER BY created_at DESC
-            LIMIT ?
-            """
-            params.append(limit)
-            
-            alerts = []
-            with sqlite3.connect(self.threat_db_path) as conn:
-                cursor = conn.execute(query_sql, params)
-                
-                for row in cursor.fetchall():
-                    alert = ThreatAlert(
-                        alert_id=row[0],
-                        threat_type=ThreatType(row[1]),
-                        severity=ThreatSeverity(row[2]),
-                        title=row[3],
-                        description=row[4],
-                        source=ThreatSource(row[5]),
-                        indicators=json.loads(row[6]),
-                        matched_patterns=json.loads(row[7]),
-                        affected_repositories=json.loads(row[8]),
-                        created_at=datetime.fromisoformat(row[9]),
-                        expires_at=datetime.fromisoformat(row[10]) if row[10] else None,
-                        actionable=bool(row[11]),
-                        metadata=json.loads(row[12])
-                    )
-                    alerts.append(alert)
-            
-            return alerts
-            
-        except Exception as e:
-            logger.error(f"Failed to get active alerts: {e}")
-            return []
-    
     async def resolve_alert(self, alert_id: str) -> bool:
         """Mark alert as resolved"""
         try:
@@ -1254,7 +1205,7 @@ class ThreatIntelligenceEngine:
         """Store individual CVE data record"""
         try:
             with sqlite3.connect(self.cve_db_path) as conn:
-                cursor = conn.execute("""
+                _cursor = conn.execute("""
                 INSERT OR REPLACE INTO cves (
                     cve_id, description, severity, cvss_score, cvss_vector,
                     published_date, modified_date, affected_products, reference_urls,

@@ -1,1098 +1,470 @@
-# 🔧 Deployment Guide
+# Deployment Guide
 
-## Overview
+ONYX has two supported deployment shapes:
 
-ONYX - Security Intelligence Platform supports multiple deployment options to fit different infrastructure requirements. This guide covers deployment strategies from local development to enterprise production environments.
+1. **Current hosted path:** Jenkins deploys to an EC2 host running the backend
+   under systemd, nginx serving the frontend build, MongoDB, and optional
+   Ollama.
+2. **Self-hosted path:** Docker Compose runs the frontend, backend, MongoDB, and
+   optional Ollama on one host.
 
-## Quick Links
-
-After deployment, your services will be available at:
-
-- **Frontend**: Your Vercel URL (e.g., `https://your-app.vercel.app`)
-- **Backend**: Your Render URL (e.g., `https://your-backend.onrender.com`)
-- **API Docs**: `https://your-backend.onrender.com/docs`
-- **Health Check**: `https://your-backend.onrender.com/health`
+Reusable systemd, nginx, environment, and bootstrap assets live under `deploy/`.
+The operator runbook is `deploy/README.md`. Credentials are not stored in the
+repository. The `Jenkinsfile` is the source of truth for the current pipeline.
+The configured production hostname `onyx.ajuna.website` did not resolve during
+the October 2026 audit; verify DNS, TLS, and service health before treating that
+instance as live.
 
 ---
 
-## 🐳 Docker Deployment (Recommended)
+## Deployment Requirements
 
-### Prerequisites
+| Component | Requirement |
+|---|---|
+| Python | 3.13 |
+| Node.js | 22 for frontend builds |
+| MongoDB | 7+ |
+| Reverse proxy | nginx or equivalent |
+| TLS | Valid certificate for the public hostname |
+| Memory | 4 GB minimum for cloud AI; 8 GB+ recommended for Ollama |
+| Disk | 10 GB+ for application and scans; more for models and backups |
 
-- Docker 20.10+ and Docker Compose 2.0+
-- 4GB+ RAM available
-- 10GB+ disk space
+For production, prefer a host with 8 GB+ RAM, MongoDB with authentication and
+backups, a least-privilege SCM token, and external monitoring.
 
-### Quick Start with Docker Compose
+---
 
-1. **Clone the repository:**
+## Option A: Current Jenkins/EC2 Deployment
 
-```bash
-git clone https://github.com/Sagar4173/ONYX.git
-cd ONYX
+### Reusable host assets
+
+| Path | Purpose |
+|---|---|
+| `deploy/systemd/onyx-backend.service.template` | systemd unit for Uvicorn |
+| `deploy/nginx/onyx.conf.template` | host nginx site and API/WebSocket proxies |
+| `deploy/env/backend.production.env.example` | production backend env template |
+| `deploy/env/frontend.production.env.example` | production frontend build env |
+| `deploy/scripts/install-packages.sh` | install AL2023 runtime packages |
+| `deploy/scripts/bootstrap-app.sh` | create venv, install deps, build, publish |
+| `deploy/scripts/install-host-config.sh` | install systemd/nginx and restart |
+| `deploy/scripts/preflight.sh` | read-only host readiness check |
+| `deploy/scripts/smoke-test.sh` | verify services through nginx |
+| `deploy/scripts/enable-tls.sh` | request and install Let's Encrypt TLS |
+| `deploy/README.md` | complete operator runbook |
+
+Templates use `__ONYX_DOMAIN__`, `__ONYX_USER__`, `__ONYX_PROJECT_DIR__`, and
+`REPLACE_WITH_...` placeholders. Never commit filled-in production files.
+
+### Host layout
+
+```text
+/home/ec2-user/ONYX/
+├── backend/
+│   ├── .env                 # untracked, not in Git
+│   ├── venv/
+│   └── app.py
+├── frontend/
+│   ├── .env                 # untracked, not in Git
+│   └── dist/
+├── deploy/
+└── Jenkinsfile
+
+/var/www/onyx/               # nginx document root, rebuilt from frontend/dist
+/etc/systemd/system/onyx-backend.service
+/etc/nginx/conf.d/onyx.conf
+MongoDB                      # MONGODB_URI
+Ollama                       # optional, $HOME/ollama
 ```
 
-2. **Configure environment:**
+Nginx serves `/var/www/onyx` rather than a directory under
+`/home/ec2-user/ONYX` to avoid home-directory traversal restrictions. The
+pipeline publishes the frontend there after a successful build.
+
+### First-time host setup
 
 ```bash
-# Copy environment template
-cp .env.example .env
+git clone https://github.com/Sagar4173/ONYX.git /home/ec2-user/ONYX
+cd /home/ec2-user/ONYX
+chmod +x deploy/scripts/*.sh
+./deploy/scripts/install-packages.sh
 
-# Edit configuration
-nano .env
+cp deploy/env/backend.production.env.example backend/.env
+cp deploy/env/frontend.production.env.example frontend/.env
+chmod 600 backend/.env frontend/.env
+# Fill in real values, then:
+./deploy/scripts/bootstrap-app.sh
+./deploy/scripts/preflight.sh
+
+sudo env \
+  ONYX_DOMAIN=onyx.ajuna.website \
+  ONYX_USER=ec2-user \
+  ONYX_PROJECT_DIR=/home/ec2-user/ONYX \
+  ./deploy/scripts/install-host-config.sh
+
+./deploy/scripts/smoke-test.sh
 ```
 
-3. **Required environment variables:**
+After DNS points at the Elastic IP:
+
+```bash
+sudo env ONYX_EMAIL=admin@example.com \
+  ./deploy/scripts/enable-tls.sh onyx.ajuna.website
+```
+
+See `deploy/README.md` for prerequisites, security-group rules, MongoDB setup,
+Jenkins configuration, and the handoff checklist.
+
+### Pipeline behavior
+
+`Jenkinsfile` currently:
+
+1. Cleans old workspaces, package caches, logs, and old backups.
+2. Clones `/home/ec2-user/ONYX` on a fresh host, or records the last successful
+   deployment, marks the deploy in progress, and hard-resets an existing
+   checkout to `origin/master`.
+3. Verifies production env files, rejects untouched environment templates, and
+   checks that the host systemd/nginx configuration is installed.
+4. Creates or validates the backend venv and installs backend dependencies.
+5. Runs backend tests.
+6. Installs scanner binaries.
+7. Sets up and starts Ollama, pulling the configured small model if absent.
+8. Installs frontend dependencies with `npm ci`, runs tests, and builds.
+9. Publishes `frontend/dist/` to `/var/www/onyx`.
+10. Restarts Ollama, `onyx-backend`, and nginx.
+11. Checks the backend directly and through nginx, then checks service status
+    and optional Ollama.
+12. Records the current commit as the last successful deployment and clears the
+    deploy marker after all checks pass.
+
+The deployment checkout is intentionally separate from the Jenkins workspace so
+workspace cleanup cannot delete `.env` files or the venv.
+
+Jenkins records the last successful deployment in
+`$HOME/.onyx_deployed_commit` and copies it to `$HOME/.onyx_previous_commit` at
+the start of each deploy. It sets the deploy marker before resetting the
+checkout, so failures and aborts after that point trigger
+`scripts/rollback.sh`. The script resets to the previous commit, reinstalls
+backend dependencies, rebuilds and republishes the frontend, restarts services,
+and retries the backend health check. A successful rollback records the
+restored commit as the last successful deployment. If rollback fails, Jenkins
+restarts the current services as a last resort.
+
+Rollback restores code and frontend assets, not MongoDB data. Take a database
+backup before each release. The state files must be writable by the Jenkins
+agent user, and the rollback path should be exercised once on the EC2 host.
+
+The Jenkins pipeline uses `qwen2.5-coder:3b` to fit the host; the backend example
+configuration uses `qwen2.5-coder:3b`. Set the model explicitly in
+`backend/.env` and confirm it exists in Ollama.
+
+### Required host configuration
+
+Create `backend/.env` from
+`deploy/env/backend.production.env.example`. At minimum, set:
 
 ```env
-# Database
-MONGODB_URL=mongodb://mongodb:27017/onyx
-MONGODB_DB_NAME=onyx
-
-# OpenAI API (Primary AI Provider)
-OPENAI_API_KEY=sk-your-openai-api-key-here
-
-# Google Gemini API (Alternative AI Provider)
-GEMINI_API_KEY=your-gemini-api-key-here
-GEMINI_MODEL=gemini-pro
-AI_PROVIDER=openai  # Options: "openai" or "gemini"
-
-# JWT Authentication
-SECRET_KEY=your-super-secret-key-here
-JWT_ALGORITHM=HS256
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# Notifications
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/slack/webhook
-TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/your/teams/webhook
-
-# Application
 ENVIRONMENT=production
 DEBUG=false
-LOG_LEVEL=info
-CORS_ORIGINS=["https://your-frontend-domain.com"]
+SECRET_KEY=<random-32+-character-secret>
+MONGODB_URI=<authenticated MongoDB URI>
+FRONTEND_URL=https://onyx.ajuna.website
+CORS_ORIGINS=https://onyx.ajuna.website
+ALLOWED_ORIGINS=https://onyx.ajuna.website
+WEBHOOK_SECRET=<random-secret>
 ```
 
-4. **Start the platform:**
+Create `frontend/.env` from
+`deploy/env/frontend.production.env.example`:
 
-```bash
-# Production deployment
-docker-compose -f docker-compose.prod.yml up -d
-
-# Development deployment
-docker-compose up -d
+```env
+VITE_API_URL=/api
+VITE_WS_URL=
+VITE_ENVIRONMENT=production
 ```
 
-5. **Verify deployment:**
+For a same-origin nginx deployment, `VITE_API_URL=/api` is correct. For a split
+API domain, use its full HTTPS URL.
 
-```bash
-# Check service status
-docker-compose ps
+The installed nginx site:
 
-# Check logs
-docker-compose logs -f
+- serves `/var/www/onyx` (published `root:root`, readable by nginx) and falls
+  back to `index.html` for SPA routes
+- proxies `/api/` to the backend
+- proxies `/ws` with HTTP/1.1 upgrade headers
+- proxies `/health`, `/docs`, `/docs/oauth2-redirect`, `/redoc`, and
+  `/openapi.json`
+- limits request bodies to 10 MB
+- adds security headers and static asset caching
 
-# Health check
-curl http://localhost:8000/health
-```
+The installed systemd unit:
 
-### Docker Compose Configuration
+- runs as the deployment user
+- loads `backend/.env`
+- starts Uvicorn on `127.0.0.1:8000` with one worker
+- restarts on failure
+- sends logs to journald with Uvicorn access logging disabled
+- prepends the backend venv to `PATH` so Jenkins-installed scanners are visible
+- uses `PrivateTmp`, `ProtectSystem=full`, and `NoNewPrivileges`
 
-**Production (`docker-compose.prod.yml`):**
+### Configure Jenkins
 
-```yaml
-version: "3.8"
+- Point the job at `https://github.com/Sagar4173/ONYX.git`.
+- Use branch `*/master` and script path `Jenkinsfile`.
+- Prefer a Jenkins SSH agent running as `ec2-user`; the pipeline writes the
+  deployment checkout and `$HOME/.onyx_*` state files.
+- Grant narrowly scoped passwordless sudo for the commands in `Jenkinsfile`.
+  Verify with `sudo -l -U <agent-user>`. Unrestricted `sudo rsync`, `install`,
+  `chmod`, or `tee` rules are effectively root-equivalent; scope them to exact
+  paths and arguments.
+- Keep `.env` files out of Git; they are untracked and survive the hard reset.
+  Preflight and Jenkins require `backend/.env` and `frontend/.env` to be mode
+  `600` or `400`.
+- Do not store credentials in the Jenkinsfile or console output.
+- Confirm the health check can actually fail the build.
 
-services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
-    ports:
-      - "8000:8000"
-    environment:
-      - MONGODB_URL=mongodb://mongodb:27017/onyx
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - SECRET_KEY=${SECRET_KEY}
-    depends_on:
-      - mongodb
-      - redis
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - onyx-network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      - backend
-    restart: unless-stopped
-    volumes:
-      - ./ssl:/etc/nginx/ssl
-    networks:
-      - onyx-network
-
-  mongodb:
-    image: mongo:7.0
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-      - ./backend/scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_ROOT_PASSWORD}
-      - MONGO_INITDB_DATABASE=onyx
-    restart: unless-stopped
-    networks:
-      - onyx-network
-
-  redis:
-    image: redis:7.0-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    networks:
-      - onyx-network
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
-    depends_on:
-      - frontend
-      - backend
-    restart: unless-stopped
-    networks:
-      - onyx-network
-
-volumes:
-  mongodb_data:
-  redis_data:
-
-networks:
-  onyx-network:
-    driver: bridge
-```
+If the repository becomes private, configure a read-only SCM credential; the
+current pipeline performs a plain `git clone` of the public repository.
 
 ---
 
-## ☁️ Cloud Deployment Options
+## Option B: Docker Compose
 
-### AWS Deployment
+### 1. Configure
 
-#### Option 1: ECS with Fargate
-
-**Prerequisites:**
-
-- AWS CLI configured
-- ECS CLI installed
-- ECR repositories created
-
-**Deploy with CloudFormation:**
-
-```yaml
-# cloudformation/ecs-deployment.yml
-AWSTemplateFormatVersion: "2010-09-09"
-Description: "onyx AI Platform ECS Deployment"
-
-Parameters:
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-    Description: VPC for the ECS cluster
-
-  SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: Subnets for the ECS service
-
-  OpenAIApiKey:
-    Type: String
-    NoEcho: true
-    Description: OpenAI API Key
-
-Resources:
-  ECSCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: onyx-cluster
-      CapacityProviders:
-        - FARGATE
-        - FARGATE_SPOT
-
-  TaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: onyx-task
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      Cpu: 1024
-      Memory: 2048
-      ExecutionRoleArn: !Ref ExecutionRole
-      TaskRoleArn: !Ref TaskRole
-      ContainerDefinitions:
-        - Name: backend
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/onyx-backend:latest
-          PortMappings:
-            - ContainerPort: 8000
-          Environment:
-            - Name: MONGODB_URL
-              Value: !Sub mongodb://${DocumentDBCluster.Endpoint}:27017/onyx
-            - Name: OPENAI_API_KEY
-              Value: !Ref OpenAIApiKey
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: /ecs/onyx
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: backend
-
-  ECSService:
-    Type: AWS::ECS::Service
-    Properties:
-      Cluster: !Ref ECSCluster
-      TaskDefinition: !Ref TaskDefinition
-      DesiredCount: 2
-      LaunchType: FARGATE
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          SecurityGroups:
-            - !Ref SecurityGroup
-          Subnets: !Ref SubnetIds
-          AssignPublicIp: ENABLED
-      LoadBalancers:
-        - ContainerName: backend
-          ContainerPort: 8000
-          TargetGroupArn: !Ref TargetGroup
-
-  DocumentDBCluster:
-    Type: AWS::DocDB::DBCluster
-    Properties:
-      DBClusterIdentifier: onyx-docdb
-      EngineVersion: 4.0.0
-      MasterUsername: admin
-      MasterUserPassword: !Ref DocumentDBPassword
-      VpcSecurityGroupIds:
-        - !Ref DocumentDBSecurityGroup
-      DBSubnetGroupName: !Ref DocumentDBSubnetGroup
-
-Outputs:
-  LoadBalancerDNS:
-    Description: DNS name of the load balancer
-    Value: !GetAtt LoadBalancer.DNSName
+```powershell
+Copy-Item backend\.env.example backend\.env
+# Set SECRET_KEY and FRONTEND_URL; Compose supplies MONGODB_URI
 ```
 
-**Deploy command:**
+For a public domain, set in `backend/.env`:
 
-```bash
-aws cloudformation deploy \
-  --template-file cloudformation/ecs-deployment.yml \
-  --stack-name onyx-platform \
-  --parameter-overrides \
-    VpcId=vpc-12345678 \
-    SubnetIds=subnet-12345678,subnet-87654321 \
-    OpenAIApiKey=sk-your-key-here \
-  --capabilities CAPABILITY_IAM
-```
-
-#### Option 2: EC2 with Auto Scaling
-
-**User Data script for EC2 instances:**
-
-```bash
-#!/bin/bash
-yum update -y
-yum install -y docker
-
-# Start Docker
-systemctl start docker
-systemctl enable docker
-usermod -a -G docker ec2-user
-
-# Install Docker Compose
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
-
-# Clone repository
-cd /opt
-git clone https://github.com/Sagar4173/ONYX.git
-cd ONYX
-
-# Configure environment
-cat > .env << EOF
-MONGODB_URL=mongodb://mongodb.cluster.amazonaws.com:27017/onyx
-OPENAI_API_KEY=${OpenAIApiKey}
-SECRET_KEY=${SecretKey}
+```env
 ENVIRONMENT=production
-EOF
-
-# Start services
-docker-compose -f docker-compose.prod.yml up -d
-
-# Configure log rotation
-cat > /etc/logrotate.d/docker-compose << EOF
-/opt/ONYX/logs/*.log {
-    daily
-    rotate 7
-    compress
-    missingok
-    notifempty
-    copytruncate
-}
-EOF
+DEBUG=false
+FRONTEND_URL=https://your-domain.example
+CORS_ORIGINS=https://your-domain.example
+WEBHOOK_SECRET=<random-secret>
 ```
 
-### Google Cloud Platform (GCP)
+The Compose file overrides container-internal MongoDB and AI URLs. It does not
+inject a public hostname; configure `FRONTEND_URL` and `CORS_ORIGINS` explicitly.
 
-#### Deploy to Google Kubernetes Engine (GKE)
+### 2. Start
 
-**1. Create GKE cluster:**
+```powershell
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend
+```
+
+### 3. Pull a local model (optional)
+
+```powershell
+docker compose exec ollama ollama pull qwen2.5-coder:7b
+```
+
+Cloud AI can be used instead by setting provider keys.
+
+### 4. Ports
+
+| Service | Host exposure | Internal |
+|---|---|---|
+| frontend | 80 | 80 |
+| backend | none | 8000 |
+| MongoDB | none | 27017 |
+| Ollama | none | 11434 |
+
+Do not add host mappings for MongoDB or Ollama on an internet-facing host.
+Use `docker compose exec` for administrative access.
+
+### 5. Verify
+
+```powershell
+curl.exe -fsS http://localhost/health
+curl.exe -fsS http://localhost/api/stats/public
+```
+
+Open http://localhost. API documentation is at http://localhost/docs and
+http://localhost/redoc.
+
+---
+
+## Standalone Backend and Frontend
+
+### Backend
 
 ```bash
-# Create cluster
-gcloud container clusters create onyx-cluster \
-  --num-nodes=3 \
-  --machine-type=e2-standard-4 \
-  --zone=us-central1-a \
-  --enable-autoscaling \
-  --min-nodes=1 \
-  --max-nodes=10
-
-# Get credentials
-gcloud container clusters get-credentials onyx-cluster --zone=us-central1-a
-```
-
-**2. Deploy with Kubernetes manifests:**
-
-```yaml
-# k8s/namespace.yml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: onyx
-
----
-# k8s/configmap.yml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: app-config
-  namespace: onyx
-data:
-  MONGODB_URL: "mongodb://mongodb-service:27017/onyx"
-  ENVIRONMENT: "production"
-  LOG_LEVEL: "info"
-
----
-# k8s/secret.yml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: app-secrets
-  namespace: onyx
-type: Opaque
-data:
-  OPENAI_API_KEY: <base64-encoded-key>
-  SECRET_KEY: <base64-encoded-secret>
-
----
-# k8s/backend-deployment.yml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: backend
-  namespace: onyx
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: backend
-  template:
-    metadata:
-      labels:
-        app: backend
-    spec:
-      containers:
-        - name: backend
-          image: gcr.io/your-project/onyx-backend:latest
-          ports:
-            - containerPort: 8000
-          envFrom:
-            - configMapRef:
-                name: app-config
-            - secretRef:
-                name: app-secrets
-          resources:
-            requests:
-              cpu: 500m
-              memory: 1Gi
-            limits:
-              cpu: 1000m
-              memory: 2Gi
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 30
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-
----
-# k8s/backend-service.yml
-apiVersion: v1
-kind: Service
-metadata:
-  name: backend-service
-  namespace: onyx
-spec:
-  selector:
-    app: backend
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8000
-  type: ClusterIP
-
----
-# k8s/ingress.yml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: onyx-ingress
-  namespace: onyx
-  annotations:
-    kubernetes.io/ingress.class: "gce"
-    kubernetes.io/ingress.global-static-ip-name: "onyx-ip"
-    networking.gke.io/managed-certificates: "onyx-ssl-cert"
-spec:
-  rules:
-    - host: api.onyx.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: backend-service
-                port:
-                  number: 80
-```
-
-**3. Deploy to cluster:**
-
-```bash
-# Apply all manifests
-kubectl apply -f k8s/
-
-# Check deployment status
-kubectl get pods -n onyx
-kubectl get services -n onyx
-kubectl get ingress -n onyx
-
-# View logs
-kubectl logs -f deployment/backend -n onyx
-```
-
-### Microsoft Azure
-
-#### Deploy to Azure Container Instances (ACI)
-
-**Azure Resource Manager template:**
-
-```json
-{
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "parameters": {
-    "openAIApiKey": {
-      "type": "securestring",
-      "metadata": {
-        "description": "OpenAI API Key"
-      }
-    }
-  },
-  "resources": [
-    {
-      "type": "Microsoft.ContainerInstance/containerGroups",
-      "apiVersion": "2021-03-01",
-      "name": "onyx-platform",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "containers": [
-          {
-            "name": "backend",
-            "properties": {
-              "image": "your-registry.azurecr.io/onyx-backend:latest",
-              "ports": [
-                {
-                  "port": 8000,
-                  "protocol": "TCP"
-                }
-              ],
-              "environmentVariables": [
-                {
-                  "name": "OPENAI_API_KEY",
-                  "secureValue": "[parameters('openAIApiKey')]"
-                },
-                {
-                  "name": "MONGODB_URL",
-                  "value": "mongodb://cosmosdb-account.mongo.cosmos.azure.com:10255/onyx"
-                }
-              ],
-              "resources": {
-                "requests": {
-                  "cpu": 1,
-                  "memoryInGB": 2
-                }
-              }
-            }
-          }
-        ],
-        "osType": "Linux",
-        "ipAddress": {
-          "type": "Public",
-          "ports": [
-            {
-              "port": 8000,
-              "protocol": "TCP"
-            }
-          ]
-        }
-      }
-    }
-  ]
-}
-```
-
-**Deploy with Azure CLI:**
-
-```bash
-# Create resource group
-az group create --name onyx-rg --location eastus
-
-# Deploy template
-az deployment group create \
-  --resource-group onyx-rg \
-  --template-file azure-deployment.json \
-  --parameters openAIApiKey=sk-your-key-here
-
-# Get container IP
-az container show --resource-group onyx-rg --name onyx-platform --query ipAddress.ip
-```
-
----
-
-## 🔧 Manual Deployment
-
-### Ubuntu/Debian Server
-
-**1. System preparation:**
-
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install dependencies
-sudo apt install -y python3.11 python3.11-venv python3-pip nodejs npm git curl
-
-# Install MongoDB
-wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
-echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-sudo apt update
-sudo apt install -y mongodb-org
-
-# Start MongoDB
-sudo systemctl start mongod
-sudo systemctl enable mongod
-
-# Install security tools
-sudo apt install -y docker.io
-curl -sSfL https://raw.githubusercontent.com/securecodewarrior/semgrep/develop/install.sh | sh
-wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.48.0_Linux-64bit.deb
-sudo dpkg -i trivy_0.48.0_Linux-64bit.deb
-```
-
-**2. Application setup:**
-
-```bash
-# Clone repository
-cd /opt
-sudo git clone https://github.com/Sagar4173/ONYX.git
-sudo chown -R $USER:$USER ONYX
-cd ONYX
-
-# Backend setup
 cd backend
-python3.11 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+source .venv/bin/activate
+uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1
+```
 
-# Frontend setup
-cd ../frontend
-npm install
+Use one worker with the current scheduler and WebSocket manager. If using
+Gunicorn with Uvicorn workers, confirm scheduled jobs and WebSocket coordination
+before increasing worker count.
+
+### Frontend
+
+```bash
+cd frontend
+npm ci
 npm run build
-
-# Configure environment
-cd ..
-cp .env.example .env
-nano .env  # Edit configuration
 ```
 
-**3. Service configuration:**
-
-**Backend systemd service (`/etc/systemd/system/onyx-backend.service`):**
-
-```ini
-[Unit]
-Description=onyx AI Backend
-After=network.target mongod.service
-Requires=mongod.service
-
-[Service]
-Type=simple
-User=onyx
-WorkingDirectory=/opt/ONYX/backend
-Environment=PATH=/opt/ONYX/backend/venv/bin
-ExecStart=/opt/ONYX/backend/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Nginx configuration (`/etc/nginx/sites-available/onyx`):**
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name your-domain.com;
-
-    ssl_certificate /etc/ssl/certs/onyx.crt;
-    ssl_certificate_key /etc/ssl/private/onyx.key;
-
-    # Frontend
-    location / {
-        root /opt/ONYX/frontend/dist;
-        try_files $uri $uri/ /index.html;
-    }
-
-    # Backend API
-    location /api/ {
-        proxy_pass http://localhost:8000/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # WebSocket support
-    location /ws {
-        proxy_pass http://localhost:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-    }
-}
-```
-
-**4. Start services:**
-
-```bash
-# Create user
-sudo useradd -r -s /bin/false onyx
-
-# Set permissions
-sudo chown -R onyx:onyx /opt/ONYX
-
-# Enable and start services
-sudo systemctl enable onyx-backend
-sudo systemctl start onyx-backend
-
-# Configure nginx
-sudo ln -s /etc/nginx/sites-available/onyx /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-
-# Check status
-sudo systemctl status onyx-backend
-sudo systemctl status nginx
-```
+Serve `dist/` with nginx or another static server that supports SPA fallback.
+Do not use `vite preview` as a production server.
 
 ---
 
-## 🔒 Production Security
+## TLS and Firewall
 
-### SSL/TLS Configuration
-
-**Let's Encrypt with Certbot:**
+On Amazon Linux 2023, install packages once:
 
 ```bash
-# Install Certbot
-sudo apt install -y certbot python3-certbot-nginx
-
-# Obtain certificate
-sudo certbot --nginx -d your-domain.com
-
-# Auto-renewal
-sudo crontab -e
-# Add: 0 12 * * * /usr/bin/certbot renew --quiet
+./deploy/scripts/install-packages.sh
 ```
 
-### Firewall Configuration
+After DNS points at the Elastic IP and HTTP health passes:
 
 ```bash
-# UFW (Ubuntu/Debian)
-sudo ufw enable
-sudo ufw allow ssh
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw deny 8000/tcp  # Block direct backend access
-sudo ufw deny 27017/tcp # Block direct MongoDB access
-
-# Check status
-sudo ufw status
+sudo env ONYX_EMAIL=admin@example.com \
+  ./deploy/scripts/enable-tls.sh your-domain.example
 ```
 
-### Security Hardening
+The script runs `certbot --nginx --redirect`, enables the renewal timer, and
+checks HTTPS. Verify renewal:
 
-**1. MongoDB security:**
-
-```javascript
-// MongoDB admin user creation
-use admin
-db.createUser({
-  user: "admin",
-  pwd: "secure-password-here",
-  roles: [ { role: "userAdminAnyDatabase", db: "admin" } ]
-})
-
-// Application user
-use onyx
-db.createUser({
-  user: "app",
-  pwd: "app-password-here",
-  roles: [ { role: "readWrite", db: "onyx" } ]
-})
+```bash
+sudo certbot renew --dry-run
 ```
 
-**2. Application security:**
+Use the EC2 security group rather than host `ufw`:
 
-```env
-# Strong JWT secret
-SECRET_KEY=your-super-long-random-secret-key-here
+| Port | Source |
+|---|---|
+| 22 | administrator IP only |
+| 80 | anywhere, for HTTP and ACME |
+| 443 | anywhere, for HTTPS |
 
-# Secure headers
-SECURE_HEADERS=true
-CSRF_PROTECTION=true
-
-# Rate limiting
-RATE_LIMIT_REQUESTS=100
-RATE_LIMIT_WINDOW=60
-
-# IP filtering
-ALLOWED_IPS=10.0.0.0/8,192.168.0.0/16
-```
+Do not expose MongoDB (27017), Ollama (11434), or the backend (8000) publicly.
+Restrict SSH to trusted addresses.
 
 ---
 
-## 📊 Monitoring & Logging
+## Product Sizing Guidance
 
-### Prometheus & Grafana
+### Free or evaluation
 
-**docker-compose-monitoring.yml:**
+- 4 GB VM, 2 vCPU, cloud AI keys
+- external or local MongoDB
+- Cloudflare or Let's Encrypt for TLS
+- accept slower scans and no high availability
 
-```yaml
-version: "3.8"
+A 4 GB host is usually too small for a 7B local model and concurrent scans.
+Use cloud AI or a smaller model.
 
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--web.console.libraries=/etc/prometheus/console_libraries"
-      - "--web.console.templates=/etc/prometheus/consoles"
+### Production
 
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    ports:
-      - "9100:9100"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)"
-
-volumes:
-  prometheus_data:
-  grafana_data:
-```
-
-### Log Management
-
-**Centralized logging with ELK Stack:**
-
-```yaml
-# docker-compose-logging.yml
-version: "3.8"
-
-services:
-  elasticsearch:
-    image: elasticsearch:8.5.0
-    environment:
-      - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - "9200:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-
-  logstash:
-    image: logstash:8.5.0
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./logging/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
-    depends_on:
-      - elasticsearch
-
-  kibana:
-    image: kibana:8.5.0
-    ports:
-      - "5601:5601"
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    depends_on:
-      - elasticsearch
-
-volumes:
-  elasticsearch_data:
-```
+- 8 GB+ RAM, 2-4 vCPU, SSD
+- MongoDB with authentication, TLS, and tested backups
+- 8 GB+ extra capacity if running Ollama
+- external uptime monitoring and log retention
+- least-privilege SCM tokens and a documented key-rotation process
+- regular dependency and host patching
 
 ---
 
-## 🔄 Backup & Recovery
+## Backups
 
-### Database Backup
-
-**Automated backup script:**
+### MongoDB
 
 ```bash
-#!/bin/bash
-# backup-mongodb.sh
-
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/opt/backups/mongodb"
-DB_NAME="onyx"
-
-# Create backup directory
-mkdir -p $BACKUP_DIR
-
-# Create backup
-mongodump --db $DB_NAME --out $BACKUP_DIR/$DATE
-
-# Compress backup
-tar -czf $BACKUP_DIR/mongodb_backup_$DATE.tar.gz -C $BACKUP_DIR $DATE
-
-# Remove uncompressed backup
-rm -rf $BACKUP_DIR/$DATE
-
-# Keep only last 7 days of backups
-find $BACKUP_DIR -name "mongodb_backup_*.tar.gz" -mtime +7 -delete
-
-echo "Backup completed: mongodb_backup_$DATE.tar.gz"
+mongodump --uri="$MONGODB_URI" --out="/backup/$(date +%Y%m%d)"
 ```
 
-**Cron job for daily backups:**
+Example cron entry:
 
-```bash
-# Add to crontab
-0 2 * * * /opt/scripts/backup-mongodb.sh >> /var/log/mongodb-backup.log 2>&1
+```cron
+0 2 * * * mongodump --uri="$MONGODB_URI" --out="/backup/$(date +\%Y\%m\%d)"
 ```
 
-### Disaster Recovery
+Also back up:
 
-**Recovery procedure:**
+- `backend/.env` through an approved secrets mechanism
+- `backend/data/knowledge.db`
+- ML state if enabled
+- the deployed commit SHA
+- host nginx and systemd configuration
 
-```bash
-# Stop services
-sudo systemctl stop onyx-backend
-
-# Restore from backup
-tar -xzf mongodb_backup_20240115_020000.tar.gz
-mongorestore --db onyx --drop onyx/
-
-# Start services
-sudo systemctl start onyx-backend
-
-# Verify functionality
-curl http://localhost:8000/health
-```
+Restore-test backups. A backup that has never been restored is unverified.
 
 ---
 
-## 📈 Scaling Considerations
+## Monitoring
 
-### Horizontal Scaling
+- Health: `GET /health` through nginx or directly on the backend; require
+  `"status": "healthy"`
+- Metrics: `GET /metrics` on the backend port; nginx does not proxy it by default
+- Errors: configure `SENTRY_DSN`
+- Logs: journald, nginx logs, Docker logs, and Ollama logs. Uvicorn access
+  logging is disabled and `/ws` access logging is off; nginx error logs can
+  still contain request URIs (including WebSocket query tokens) on upstream
+  errors, so restrict access and retention.
+- Scanner availability: `GET /api/scanners/health`
 
-**Load balancer configuration (HAProxy):**
+Recommended alerts:
 
-```
-global
-    daemon
-
-defaults
-    mode http
-    timeout connect 5000ms
-    timeout client 50000ms
-    timeout server 50000ms
-
-frontend onyx_frontend
-    bind *:80
-    default_backend onyx_backend
-
-backend onyx_backend
-    balance roundrobin
-    server backend1 10.0.1.10:8000 check
-    server backend2 10.0.1.11:8000 check
-    server backend3 10.0.1.12:8000 check
-```
-
-### Database Scaling
-
-**MongoDB replica set:**
-
-```javascript
-// Initialize replica set
-rs.initiate({
-  _id: "onyx-rs",
-  members: [
-    { _id: 0, host: "mongo1:27017", priority: 1 },
-    { _id: 1, host: "mongo2:27017", priority: 0.5 },
-    { _id: 2, host: "mongo3:27017", priority: 0.5 },
-  ],
-});
-```
+- backend process down
+- 5xx rate increase
+- MongoDB connectivity failure
+- disk usage above 80%
+- TLS expiration
+- repeated webhook authentication failures
+- AI provider failure rate
+- scan failure rate or stuck scans
 
 ---
 
-## 🆘 Troubleshooting
+## CI/CD
 
-### Common Issues
+`.github/workflows/ci.yml` runs on pushes and pull requests to `master`/`main`:
 
-**1. Backend fails to start:**
+1. backend pytest
+2. frontend lint, tests, and production build
+3. Playwright smoke and authenticated flows: registration, login, dashboard,
+   and sidebar navigation
+4. backend and frontend Docker image builds
+5. Compose smoke test: starts MongoDB, backend, and frontend, then checks nginx
+   health, API docs, security headers, and that backend port 8000 is not
+   published on the host
+6. deployment-asset checks: shell syntax, nginx template syntax, and required
+   template placeholders
 
-```bash
-# Check logs
-sudo journalctl -u onyx-backend -f
+GitHub Actions is verification, not the current deployment mechanism. The
+Jenkins pipeline is the current EC2 deployment path.
 
-# Common fixes
-sudo systemctl restart onyx-backend
-sudo systemctl status onyx-backend
-```
+Before promoting a release:
 
-**2. Database connection issues:**
-
-```bash
-# Test MongoDB connection
-mongosh --eval "db.adminCommand('ismaster')"
-
-# Check MongoDB logs
-sudo tail -f /var/log/mongodb/mongod.log
-```
-
-**3. Scanner tool errors:**
-
-```bash
-# Test individual scanners
-semgrep --version
-trivy version
-gitleaks version
-
-# Update scanner databases
-trivy image --download-db-only
-```
-
-**4. Memory/CPU issues:**
-
-```bash
-# Monitor resources
-htop
-docker stats
-
-# Adjust container limits in docker-compose.yml
-```
-
-### Performance Optimization
-
-**1. Database optimization:**
-
-```javascript
-// Create indexes
-db.reports.createIndex({ created_at: -1 });
-db.reports.createIndex({ project_name: 1, status: 1 });
-db.reports.createIndex({ "git_metadata.repository_url": 1 });
-```
-
-**2. Application optimization:**
-
-```env
-# Async workers
-WORKER_PROCESSES=4
-MAX_CONCURRENT_SCANS=10
-
-# Caching
-REDIS_URL=redis://localhost:6379/0
-CACHE_TTL=3600
-```
+1. CI is green.
+2. Database backup exists.
+3. Environment changes are applied.
+4. The deployed commit is recorded.
+5. Health, login, scan, WebSocket, and webhook smoke tests pass.
+6. A rollback target is known.
 
 ---
 
-For deployment support and troubleshooting, visit our [GitHub Issues](https://github.com/Sagar4173/ONYX/issues) or [Discussion Forum](https://github.com/Sagar4173/ONYX/discussions).
+## Troubleshooting
+
+| Problem | Check |
+|---|---|
+| Jenkins build fails | Console log, `.env` presence, disk space, sudo permissions |
+| Backend fails after deploy | `journalctl -u onyx-backend`, `MONGODB_URI`, `SECRET_KEY`, dependency install |
+| nginx returns 502 | Backend process and port 8000 |
+| Login works but assets are stale | Frontend build contents, nginx root, cache headers |
+| WebSocket fails | `/ws` proxy upgrade headers, token, mixed HTTP/HTTPS |
+| Webhook returns 503 | `WEBHOOK_SECRET` unset; restart backend after setting it |
+| AI unavailable | Provider keys, provider chain, Ollama memory/model |
+| Mongo connection refused | Authentication, bind address, TLS, firewall |
+| Disk fills during deploy | Workspaces, Docker images, journald, Ollama models, backups |
+| Production hostname missing | DNS record, TLS certificate, nginx server name |

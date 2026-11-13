@@ -1,0 +1,293 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  backend:
+    name: Backend Tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --no-header -q
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          SECRET_KEY: ci-test-secret-key-not-for-production
+          ENVIRONMENT: test
+          DEBUG: "true"
+          USE_MOCK_SCANNERS: "true"
+
+  frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  deploy-assets:
+    name: Deploy Assets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate shell syntax
+        run: |
+          bash -n deploy/scripts/*.sh
+          bash -n scripts/rollback.sh
+
+      - name: Validate nginx template
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          sed 's/__ONYX_DOMAIN__/15.12.54.85/g' deploy/nginx/onyx.conf.template > /tmp/onyx-site.conf
+          {
+            echo "events {}"
+            echo "http {"
+            echo "  include /etc/nginx/mime.types;"
+            sed 's/^/  /' /tmp/onyx-site.conf
+            echo "}"
+          } | sudo tee /tmp/onyx-nginx-test.conf > /dev/null
+          sudo nginx -t -c /tmp/onyx-nginx-test.conf
+
+      - name: Validate deployment placeholders
+        run: |
+          grep -q '__ONYX_DOMAIN__' deploy/nginx/onyx.conf.template
+          grep -q '__ONYX_USER__' deploy/systemd/onyx-backend.service.template
+          grep -q '__ONYX_PROJECT_DIR__' deploy/systemd/onyx-backend.service.template
+
+  e2e:
+    name: E2E Smoke Tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+        working-directory: backend
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Start backend
+        run: |
+          nohup uvicorn app:app --host 0.0.0.0 --port 8000 > /tmp/onyx-backend.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null; then
+              echo "Backend ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend failed to become healthy"
+          cat /tmp/onyx-backend.log
+          exit 1
+        working-directory: backend
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          SECRET_KEY: ci-e2e-secret-key-not-for-production
+          ENVIRONMENT: test
+          DEBUG: "true"
+          USE_MOCK_SCANNERS: "true"
+          ALLOW_REGISTRATION: "true"
+          REQUIRE_EMAIL_VERIFICATION: "false"
+
+      - name: Start frontend
+        run: |
+          npm run build
+          nohup npx vite preview --port 5173 --host 0.0.0.0 > /tmp/onyx-frontend.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -sf http://localhost:5173/ > /dev/null; then
+              echo "Frontend ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Frontend failed to become healthy"
+          cat /tmp/onyx-frontend.log
+          exit 1
+        env:
+          E2E_BASE_URL: http://localhost:5173
+          E2E_API_URL: http://localhost:8000
+          VITE_API_URL: http://localhost:8000/api
+
+      - name: Run E2E smoke tests
+        run: npx playwright test
+        env:
+          CI: "true"
+          E2E_BASE_URL: http://localhost:5173
+          E2E_API_URL: http://localhost:8000
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          push: false
+          tags: onyx-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          push: false
+          tags: onyx-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  compose:
+    name: Compose Smoke Test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create CI environment file
+        run: |
+          cat > backend/.env <<'EOF'
+          SECRET_KEY=ci-compose-secret-key-not-for-production
+          MONGODB_URI=mongodb://mongodb:27017/onyx
+          DATABASE_NAME=onyx
+          ENVIRONMENT=production
+          DEBUG=false
+          USE_MOCK_SCANNERS=true
+          ALLOW_REGISTRATION=true
+          REQUIRE_EMAIL_VERIFICATION=false
+          WEBHOOK_SECRET=ci-compose-webhook-secret
+          FRONTEND_URL=http://localhost
+          CORS_ORIGINS=http://localhost
+          EOF
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Start Compose stack
+        run: docker compose up -d --build mongodb backend frontend
+
+      - name: Verify Compose runtime
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost/health > /dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "Compose stack did not become healthy"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://localhost/ > /dev/null
+          curl -fsS http://localhost/docs > /dev/null
+          curl -fsSI http://localhost/ | grep -qi 'x-content-type-options: nosniff'
+          curl -fsSI http://localhost/ | grep -qi 'x-frame-options: DENY'
+
+          if curl -fsS http://localhost:8000/health > /dev/null 2>&1; then
+            echo "Backend port 8000 must not be published on the host"
+            exit 1
+          fi
+
+      - name: Dump Compose logs
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop Compose stack
+        if: always()
+        run: docker compose down -v

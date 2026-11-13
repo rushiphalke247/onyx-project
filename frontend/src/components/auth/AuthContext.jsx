@@ -2,19 +2,14 @@
  * Authentication Context Provider
  * Manages authentication state across the application
  */
-import React, {
-  useState,
-  useEffect,
-  createContext,
-  useContext,
-  useCallback,
-} from "react";
+import { useState, useEffect, createContext, useContext, useCallback } from "react";
 import toast from "react-hot-toast";
 import { authAPI } from "../../services/api.js";
 
 // Auth Context
 const AuthContext = createContext(null);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -29,8 +24,26 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
+  const logout = useCallback(() => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    localStorage.removeItem("user_data");
+    setUser(null);
+    setIsAuthenticated(false);
+    toast.success("Logged out successfully");
+  }, []);
+
   // Check if user is authenticated on app load
   useEffect(() => {
+    const verifyToken = async () => {
+      try {
+        const userData = await authAPI.getProfile();
+        setUser(userData);
+      } catch (error) {
+        logout();
+      }
+    };
+
     const token = localStorage.getItem("access_token");
     const userData = localStorage.getItem("user_data");
 
@@ -48,16 +61,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     setIsLoading(false);
-  }, []);
-
-  const verifyToken = async (token) => {
-    try {
-      const userData = await authAPI.getProfile();
-      setUser(userData);
-    } catch (error) {
-      logout();
-    }
-  };
+  }, [logout]);
 
   const login = async (credentials) => {
     try {
@@ -75,83 +79,117 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Normal login flow - store tokens and user data
-      localStorage.setItem("access_token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
-      localStorage.setItem("user_data", JSON.stringify(data.user));
-
-      // Set initial user data
-      setUser(data.user);
-      setIsAuthenticated(true);
-
-      // Immediately refresh user profile to get latest verification status
-      try {
-        const updatedUser = await authAPI.getProfile();
-        setUser(updatedUser);
-        localStorage.setItem("user_data", JSON.stringify(updatedUser));
-      } catch (profileError) {
-        // Don't throw error, use the data from login response
-      }
-
-      toast.success(`Welcome back, ${data.user.full_name}!`);
+      storeSession(data);
       return data;
     } catch (error) {
-      const errorData = error.response?.data;
-
-      // Handle FastAPI validation errors (422)
-      if (error.response?.status === 422 && Array.isArray(errorData?.detail)) {
-        const validationErrors = errorData.detail;
-
-        // Format field names to be more readable
-        const formatFieldName = (field) => {
-          return field
-            .split("_")
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(" ");
-        };
-
-        // Create user-friendly error messages
-        const errorMessages = validationErrors.map((err) => {
-          const field = err.loc?.[err.loc.length - 1] || "field";
-          const fieldName = formatFieldName(field);
-
-          // Customize message based on error type
-          if (err.type === "value_error" || err.type === "string_too_short") {
-            return `${fieldName}: ${err.msg}`;
-          } else if (err.type === "missing") {
-            return `${fieldName} is required`;
-          } else {
-            return `${fieldName}: ${err.msg}`;
-          }
-        });
-
-        // Show each error separately for better visibility
-        errorMessages.forEach((msg) => {
-          toast.error(msg, { duration: 5000 });
-        });
-      } else {
-        // Handle other error types including 400, 401, etc.
-        let errorMessage =
-          errorData?.detail ||
-          errorData?.message ||
-          "Login failed. Please check your credentials.";
-
-        // Clean up error codes like "400: " or "401: "
-        if (typeof errorMessage === "string") {
-          errorMessage = errorMessage.replace(/^\d{3}:\s*/, "");
-        }
-
-        toast.error(errorMessage, { duration: 5000 });
-      }
+      showLoginError(error);
       throw error;
     }
+  };
+
+  // Shared session storage for password and SSO logins
+  const storeSession = (data) => {
+    localStorage.setItem("access_token", data.access_token);
+    localStorage.setItem("refresh_token", data.refresh_token);
+    localStorage.setItem("user_data", JSON.stringify(data.user));
+
+    setUser(data.user);
+    setIsAuthenticated(true);
+
+    // Immediately refresh user profile to get latest verification status
+    try {
+      authAPI.getProfile().then((updatedUser) => {
+        setUser(updatedUser);
+        localStorage.setItem("user_data", JSON.stringify(updatedUser));
+      });
+    } catch (profileError) {
+      // Don't throw error, use the data from login response
+    }
+
+    toast.success(`Welcome back, ${data.user.full_name}!`);
+  };
+
+  const showLoginError = (error) => {
+    const errorData = error.response?.data;
+
+    // Handle FastAPI validation errors (422)
+    if (error.response?.status === 422 && Array.isArray(errorData?.detail)) {
+      const validationErrors = errorData.detail;
+
+      // Format field names to be more readable
+      const formatFieldName = (field) => {
+        return field
+          .split("_")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" ");
+      };
+
+      // Create user-friendly error messages
+      const errorMessages = validationErrors.map((err) => {
+        const field = err.loc?.[err.loc.length - 1] || "field";
+        const fieldName = formatFieldName(field);
+
+        // Customize message based on error type
+        if (err.type === "value_error" || err.type === "string_too_short") {
+          return `${fieldName}: ${err.msg}`;
+        } else if (err.type === "missing") {
+          return `${fieldName} is required`;
+        } else {
+          return `${fieldName}: ${err.msg}`;
+        }
+      });
+
+      // Show each error separately for better visibility
+      errorMessages.forEach((msg) => {
+        toast.error(msg, { duration: 5000 });
+      });
+    } else {
+      // Handle other error types including 400, 401, etc.
+      let errorMessage =
+        errorData?.detail || errorData?.message || "Login failed. Please check your credentials.";
+
+      // Clean up error codes like "400: " or "401: "
+      if (typeof errorMessage === "string") {
+        errorMessage = errorMessage.replace(/^\d{3}:\s*/, "");
+      }
+
+      toast.error(errorMessage, { duration: 5000 });
+    }
+  };
+
+  const googleLogin = async (idToken, nonce) => {
+    try {
+      const data = await authAPI.googleLogin(idToken, null, nonce);
+
+      // Check if 2FA is required
+      if (data.requires_2fa) {
+        return {
+          requires_2fa: true,
+          temp_token: data.temp_token,
+          user_email: data.user_email,
+          message: data.message,
+        };
+      }
+
+      storeSession(data);
+      return data;
+    } catch (error) {
+      showLoginError(error);
+      throw error;
+    }
+  };
+
+  // Complete a pending SSO login that was paused for 2FA
+  const completeGoogleLogin = async (idToken, twoFactorCode, nonce) => {
+    const data = await authAPI.googleLogin(idToken, twoFactorCode, nonce);
+    storeSession(data);
+    return data;
   };
 
   const register = async (userData) => {
     try {
       const response = await authAPI.register(userData);
-      toast.success(
-        "Registration successful! Please check your email to verify your account."
-      );
+      toast.success("Registration successful! Please check your email to verify your account.");
       return response;
     } catch (error) {
       const errorData = error.response?.data;
@@ -253,23 +291,12 @@ export const AuthProvider = ({ children }) => {
       } else {
         // Handle other error types - fallback
         const errorMessage =
-          errorData?.message ||
-          errorData?.detail ||
-          "Registration failed. Please try again.";
+          errorData?.message || errorData?.detail || "Registration failed. Please try again.";
         toast.error(errorMessage, { duration: 5000 });
       }
       throw error;
     }
   };
-
-  const logout = useCallback(() => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("user_data");
-    setUser(null);
-    setIsAuthenticated(false);
-    toast.success("Logged out successfully");
-  }, []);
 
   const refreshUserProfile = async () => {
     const userData = await authAPI.getProfile();
@@ -301,8 +328,7 @@ export const AuthProvider = ({ children }) => {
       toast.success("Password reset email sent! Check your inbox.");
     } catch (error) {
       const errorMessage =
-        error.response?.data?.detail ||
-        "Failed to send reset email. Please try again.";
+        error.response?.data?.detail || "Failed to send reset email. Please try again.";
       toast.error(errorMessage);
       throw error;
     }
@@ -314,8 +340,7 @@ export const AuthProvider = ({ children }) => {
       toast.success("Password reset successful! You can now login.");
     } catch (error) {
       const errorMessage =
-        error.response?.data?.detail ||
-        "Failed to reset password. Link may be expired.";
+        error.response?.data?.detail || "Failed to reset password. Link may be expired.";
       toast.error(errorMessage);
       throw error;
     }
@@ -326,30 +351,23 @@ export const AuthProvider = ({ children }) => {
       await authAPI.resendVerificationEmail(email);
       toast.success("Verification email sent! Check your inbox.");
     } catch (error) {
-      const errorMessage =
-        error.response?.data?.detail || "Failed to send verification email.";
+      const errorMessage = error.response?.data?.detail || "Failed to send verification email.";
       toast.error(errorMessage);
       throw error;
     }
   };
 
   const verifyEmail = async (token) => {
-    try {
-      const response = await authAPI.verifyEmail(token);
-      // Only refresh user profile if user is authenticated
-      if (isAuthenticated && localStorage.getItem("access_token")) {
-        try {
-          await refreshUserProfile();
-        } catch (profileError) {
-          // Ignore profile refresh errors - verification still succeeded
-        }
+    const response = await authAPI.verifyEmail(token);
+    // Only refresh user profile if user is authenticated
+    if (isAuthenticated && localStorage.getItem("access_token")) {
+      try {
+        await refreshUserProfile();
+      } catch (profileError) {
+        // Ignore profile refresh errors - verification still succeeded
       }
-      return response;
-    } catch (error) {
-      const errorMessage =
-        error.response?.data?.detail || "Failed to verify email.";
-      throw error;
     }
+    return response;
   };
 
   const value = {
@@ -357,6 +375,8 @@ export const AuthProvider = ({ children }) => {
     isLoading,
     isAuthenticated,
     login,
+    googleLogin,
+    completeGoogleLogin,
     register,
     logout,
     refreshUserProfile,

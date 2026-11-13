@@ -1,700 +1,298 @@
-/**
- * Dashboard Page - Enhanced Enterprise Version
- * Real-time security overview with live data, charts, and actionable insights
- */
-import React, { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useMemo } from "react";
+import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ShieldCheckIcon,
-  ExclamationTriangleIcon,
-  CheckCircleIcon,
-  SparklesIcon,
-  PlusIcon,
-  BoltIcon,
-  FolderIcon,
-  DocumentChartBarIcon,
-  ClockIcon,
-  ArrowTrendingUpIcon,
-  ArrowTrendingDownIcon,
-  PlayIcon,
-  ArrowRightIcon,
-  ChartBarIcon,
-  XCircleIcon,
-} from "@heroicons/react/24/outline";
-import {
-  PageContainer,
-  PageHeader,
-  GlassCard,
-  SectionHeader,
-  LoadingState,
-} from "../layouts";
-import { reportsAPI, projectsAPI } from "../services/api";
+import { ShieldCheckIcon, BoltIcon, PlusIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
+import { reportsAPI } from "../services/api";
 import { dashboardAPI } from "../services/dashboardService";
+import { PageContainer, PageHeader, GlassCard, SectionHeader, EmptyState } from "../layouts";
+import ParticleBackground from "../components/projects/ParticleBackground";
+import MetricCard from "../components/projects/MetricCard";
+import DashboardHero from "../components/dashboard/DashboardHero";
+import ScoreTrendChart from "../components/dashboard/ScoreTrendChart";
+import QuickActions from "../components/dashboard/QuickActions";
+import RecentScans from "../components/dashboard/RecentScans";
 
-/**
- * Animated Counter Component
- */
-const AnimatedCounter = ({ value, duration = 1000 }) => {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const numValue = typeof value === "string" ? parseFloat(value) : value;
-    if (isNaN(numValue)) {
-      setCount(value);
-      return;
-    }
-
-    let start = 0;
-    const end = numValue;
-    const increment = end / (duration / 16);
-
-    const timer = setInterval(() => {
-      start += increment;
-      if (start >= end) {
-        setCount(end);
-        clearInterval(timer);
-      } else {
-        setCount(Math.floor(start));
-      }
-    }, 16);
-
-    return () => clearInterval(timer);
-  }, [value, duration]);
-
-  return (
-    <>
-      {typeof value === "string" && value.includes("%") ? `${count}%` : count}
-    </>
-  );
-};
-
-/**
- * Enhanced Stat Card with animations
- */
-const StatCard = ({ stat, index, onClick }) => {
-  const TrendIcon =
-    stat.trend >= 0 ? ArrowTrendingUpIcon : ArrowTrendingDownIcon;
-  const trendColor = stat.trendPositive
-    ? stat.trend >= 0
-      ? "text-emerald-400"
-      : "text-red-400"
-    : stat.trend >= 0
-    ? "text-red-400"
-    : "text-emerald-400";
-
-  return (
-    <div
-      onClick={onClick}
-      className={`group relative bg-gray-800/30 rounded-2xl p-5 lg:p-6 border border-gray-700/30 
-                hover:border-gray-600/50 transition-all duration-500 hover:scale-[1.02] 
-                hover:shadow-xl hover:shadow-black/20 ${
-                  onClick ? "cursor-pointer" : ""
-                }`}
-      style={{ animationDelay: `${index * 0.1}s` }}
-    >
-      {/* Gradient overlay on hover */}
-      <div
-        className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.gradient} opacity-0 
-                      group-hover:opacity-[0.08] transition-all duration-500`}
-      />
-
-      {/* Glow effect */}
-      <div
-        className={`absolute -inset-0.5 rounded-2xl bg-gradient-to-r ${stat.gradient} opacity-0 
-                      group-hover:opacity-20 blur-xl transition-all duration-500`}
-      />
-
-      <div className="relative">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div
-            className={`p-3 rounded-xl bg-gradient-to-br ${stat.gradient} shadow-lg 
-                         group-hover:shadow-xl group-hover:scale-110 transition-all duration-300`}
-          >
-            <stat.icon className="h-5 w-5 lg:h-6 lg:w-6 text-white" />
-          </div>
-          {stat.trend !== undefined && stat.trend !== null && (
-            <div
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg 
-                           ${
-                             stat.trend >= 0
-                               ? "bg-emerald-500/10"
-                               : "bg-red-500/10"
-                           }`}
-            >
-              <TrendIcon className={`h-4 w-4 ${trendColor}`} />
-              <span className={`text-xs font-semibold ${trendColor}`}>
-                {Math.abs(stat.trend)}%
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Value */}
-        <h3 className="text-3xl lg:text-4xl font-bold text-white mb-1 tracking-tight">
-          <AnimatedCounter value={stat.value} />
-        </h3>
-
-        {/* Label */}
-        <p className="text-sm text-gray-400 font-medium">{stat.label}</p>
-
-        {/* Subtitle */}
-        {stat.subtitle && (
-          <p className="text-xs text-gray-500 mt-1">{stat.subtitle}</p>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/**
- * Security Score Ring Chart
- */
-const SecurityScoreChart = ({ score = 0, size = 160 }) => {
-  const radius = (size - 20) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-
-  const getScoreColor = (s) => {
-    if (s >= 80)
-      return { stroke: "url(#scoreGreen)", text: "text-emerald-400" };
-    if (s >= 60) return { stroke: "url(#scoreYellow)", text: "text-amber-400" };
-    return { stroke: "url(#scoreRed)", text: "text-red-400" };
-  };
-
-  const colors = getScoreColor(score);
-
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg className="transform -rotate-90" width={size} height={size}>
-        <defs>
-          <linearGradient id="scoreGreen" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#10b981" />
-            <stop offset="100%" stopColor="#22c55e" />
-          </linearGradient>
-          <linearGradient id="scoreYellow" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#f59e0b" />
-            <stop offset="100%" stopColor="#eab308" />
-          </linearGradient>
-          <linearGradient id="scoreRed" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#ef4444" />
-            <stop offset="100%" stopColor="#f43f5e" />
-          </linearGradient>
-        </defs>
-
-        {/* Background circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="rgba(75, 85, 99, 0.3)"
-          strokeWidth="12"
-        />
-
-        {/* Progress circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={colors.stroke}
-          strokeWidth="12"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className="transition-all duration-1000 ease-out"
-        />
-      </svg>
-
-      {/* Center content */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={`text-4xl font-bold ${colors.text}`}>
-          <AnimatedCounter value={score} />
-        </span>
-        <span className="text-xs text-gray-400 uppercase tracking-wider mt-1">
-          Score
-        </span>
-      </div>
-    </div>
-  );
-};
-
-/**
- * Severity Distribution Bar
- */
-const SeverityBar = ({ data }) => {
-  const total =
-    (data?.critical || 0) +
-    (data?.high || 0) +
-    (data?.medium || 0) +
-    (data?.low || 0);
-  if (total === 0)
-    return (
-      <p className="text-sm text-gray-500 text-center py-4">
-        No vulnerabilities found
-      </p>
-    );
-
-  const getWidth = (count) => `${(count / total) * 100}%`;
-
-  return (
-    <div className="space-y-3">
-      <div className="flex h-3 rounded-full overflow-hidden bg-gray-800/50">
-        {data?.critical > 0 && (
-          <div
-            className="bg-gradient-to-r from-red-500 to-rose-500 transition-all duration-500"
-            style={{ width: getWidth(data.critical) }}
-          />
-        )}
-        {data?.high > 0 && (
-          <div
-            className="bg-gradient-to-r from-orange-500 to-amber-500 transition-all duration-500"
-            style={{ width: getWidth(data.high) }}
-          />
-        )}
-        {data?.medium > 0 && (
-          <div
-            className="bg-gradient-to-r from-yellow-500 to-lime-500 transition-all duration-500"
-            style={{ width: getWidth(data.medium) }}
-          />
-        )}
-        {data?.low > 0 && (
-          <div
-            className="bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-500"
-            style={{ width: getWidth(data.low) }}
-          />
-        )}
-      </div>
-
-      <div className="flex flex-wrap gap-4 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-r from-red-500 to-rose-500" />
-          <span className="text-gray-400">
-            Critical:{" "}
-            <span className="text-white font-medium">
-              {data?.critical || 0}
-            </span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-500" />
-          <span className="text-gray-400">
-            High:{" "}
-            <span className="text-white font-medium">{data?.high || 0}</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-r from-yellow-500 to-lime-500" />
-          <span className="text-gray-400">
-            Medium:{" "}
-            <span className="text-white font-medium">{data?.medium || 0}</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500" />
-          <span className="text-gray-400">
-            Low:{" "}
-            <span className="text-white font-medium">{data?.low || 0}</span>
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/**
- * Quick Action Button
- */
-const QuickAction = ({ action, index }) => (
-  <button
-    onClick={action.onClick}
-    className="group relative flex flex-col items-center justify-center p-5 rounded-xl bg-gray-800/30 
-             border border-gray-700/30 hover:border-gray-600/50 transition-all duration-300 
-             hover:scale-[1.03] text-center flex-1 min-h-[120px]"
-    style={{ animationDelay: `${index * 0.05}s` }}
-  >
-    <div
-      className={`absolute inset-0 rounded-xl bg-gradient-to-br ${action.gradient} 
-                    opacity-0 group-hover:opacity-10 transition-opacity`}
-    />
-    <div
-      className={`p-3 rounded-xl bg-gradient-to-br ${action.gradient} shadow-lg mb-3
-                    group-hover:scale-110 transition-transform`}
-    >
-      <action.icon className="h-5 w-5 text-white" />
-    </div>
-    <span className="text-sm font-medium text-white">{action.name}</span>
-    <span className="text-xs text-gray-500 mt-1">{action.description}</span>
-  </button>
-);
-
-/**
- * Recent Scan Item
- */
-const RecentScanItem = ({ report, onClick }) => {
-  const statusConfig = {
-    completed: {
-      icon: CheckCircleIcon,
-      color: "text-emerald-400",
-      bg: "bg-emerald-500/10",
-      label: "Completed",
-    },
-    in_progress: {
-      icon: ClockIcon,
-      color: "text-blue-400",
-      bg: "bg-blue-500/10",
-      label: "Running",
-    },
-    failed: {
-      icon: XCircleIcon,
-      color: "text-red-400",
-      bg: "bg-red-500/10",
-      label: "Failed",
-    },
-    pending: {
-      icon: ClockIcon,
-      color: "text-amber-400",
-      bg: "bg-amber-500/10",
-      label: "Pending",
-    },
-  };
-
-  const status = statusConfig[report.status] || statusConfig.pending;
-  const StatusIcon = status.icon;
-
-  const severityCount = report.findings_by_severity || {};
-  const hasCritical = (severityCount.critical || 0) > 0;
-  const hasHigh = (severityCount.high || 0) > 0;
-
-  return (
-    <div
-      onClick={onClick}
-      className="group flex items-center gap-4 p-4 rounded-xl bg-gray-800/20 hover:bg-gray-800/40 
-               border border-transparent hover:border-gray-700/50 transition-all cursor-pointer"
-    >
-      {/* Status Icon */}
-      <div className={`p-2.5 rounded-xl ${status.bg} flex-shrink-0`}>
-        <StatusIcon className={`h-5 w-5 ${status.color}`} />
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <h4 className="text-sm font-medium text-white truncate">
-            {report.project_name || "Unknown Project"}
-          </h4>
-          {hasCritical && (
-            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-red-500/20 text-red-400">
-              CRITICAL
-            </span>
-          )}
-          {!hasCritical && hasHigh && (
-            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-orange-500/20 text-orange-400">
-              HIGH
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 text-xs text-gray-500">
-          <span>{report.scan_type || "Security"} Scan</span>
-          <span>•</span>
-          <span>{report.total_findings || 0} findings</span>
-          <span>•</span>
-          <span>{new Date(report.created_at).toLocaleDateString()}</span>
-        </div>
-      </div>
-
-      {/* Arrow */}
-      <ArrowRightIcon
-        className="w-4 h-4 text-gray-500 group-hover:text-white 
-                                group-hover:translate-x-1 transition-all flex-shrink-0"
-      />
-    </div>
-  );
-};
-
-/**
- * Main Dashboard Component
- */
 const Dashboard = ({ notifications = [] }) => {
-  const navigate = useNavigate();
-
-  // Fetch dashboard stats
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    refetch: refetchStats,
+    isFetching: statsFetching,
+  } = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: () => dashboardAPI.getQuickStats(),
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 30000,
+    staleTime: 30000,
   });
 
-  // Fetch recent reports
-  const { data: reportsData, isLoading: reportsLoading } = useQuery({
+  const {
+    data: reportsData,
+    isLoading: reportsLoading,
+    error: reportsError,
+    refetch: refetchReports,
+  } = useQuery({
     queryKey: ["recent-reports"],
-    queryFn: () =>
-      reportsAPI.getReports({
-        limit: 10,
-        sort_by: "created_at",
-        sort_order: "desc",
-      }),
+    queryFn: () => reportsAPI.getReports({ limit: 10, sort_by: "created_at", sort_order: "desc" }),
+    staleTime: 30000,
   });
 
-  // Calculate severity distribution from all reports
-  const severityDistribution = React.useMemo(() => {
+  const { recentReports, severityDistribution } = useMemo(() => {
     const reports = reportsData?.reports || reportsData?.data || [];
-    return reports.reduce(
-      (acc, report) => {
-        const severity = report.findings_by_severity || {};
-        acc.critical += severity.critical || 0;
-        acc.high += severity.high || 0;
-        acc.medium += severity.medium || 0;
-        acc.low += severity.low || 0;
+    const dist = reports.reduce(
+      (acc, r) => {
+        const sev = r.findings_by_severity || {};
+        acc.critical += sev.critical || 0;
+        acc.high += sev.high || 0;
+        acc.medium += sev.medium || 0;
+        acc.low += sev.low || 0;
         return acc;
       },
       { critical: 0, high: 0, medium: 0, low: 0 }
     );
+    return { recentReports: reports, severityDistribution: dist };
   }, [reportsData]);
 
-  // Stats cards data
-  const statsCards = [
-    {
-      label: "Total Projects",
-      value: stats?.totalProjects || 0,
-      trend: stats?.projectsTrend,
-      trendPositive: true,
-      icon: FolderIcon,
-      gradient: "from-blue-500 to-cyan-500",
-      subtitle: "Active repositories",
-    },
-    {
-      label: "Security Scans",
-      value: stats?.totalScans || 0,
-      trend: stats?.scansTrend,
-      trendPositive: true,
-      icon: ShieldCheckIcon,
-      gradient: "from-violet-500 to-purple-500",
-      subtitle: "Total scans performed",
-    },
-    {
-      label: "Open Issues",
-      value: stats?.openIssues || 0,
-      trend: stats?.issuesTrend,
-      trendPositive: false, // Lower is better
-      icon: ExclamationTriangleIcon,
-      gradient: "from-orange-500 to-red-500",
-      subtitle: "Critical & high severity",
-    },
-    {
-      label: "Security Score",
-      value: `${Math.round(stats?.avgSecurityScore || 85)}%`,
-      trend: stats?.scoreTrend,
-      trendPositive: true,
-      icon: SparklesIcon,
-      gradient: "from-emerald-500 to-green-500",
-      subtitle: "Overall health",
-    },
-  ];
+  const score = stats?.avgSecurityScore != null ? Math.round(stats.avgSecurityScore) : null;
+  const scoreTrend = stats?.scoreTrend ?? null;
 
-  // Quick actions
-  const quickActions = [
-    {
-      name: "New Project",
-      description: "Add repository",
-      icon: PlusIcon,
-      gradient: "from-blue-500 to-purple-600",
-      onClick: () => navigate("/projects?action=new"),
-    },
-    {
-      name: "Run Scan",
-      description: "Start security scan",
-      icon: PlayIcon,
-      gradient: "from-emerald-500 to-green-500",
-      onClick: () => navigate("/projects"),
-    },
-    {
-      name: "View Reports",
-      description: "See all findings",
-      icon: DocumentChartBarIcon,
-      gradient: "from-orange-500 to-amber-500",
-      onClick: () => navigate("/reports"),
-    },
-    {
-      name: "Analytics",
-      description: "Explore trends",
-      icon: ChartBarIcon,
-      gradient: "from-pink-500 to-rose-500",
-      onClick: () => navigate("/analytics"),
-    },
-  ];
-
-  const recentReports = reportsData?.reports || reportsData?.data || [];
-
-  if (statsLoading) {
-    return (
-      <PageContainer>
-        <LoadingState message="Loading dashboard..." />
-      </PageContainer>
-    );
-  }
+  const refresh = () => {
+    refetchStats();
+    refetchReports();
+  };
 
   return (
-    <PageContainer>
-      {/* Header */}
-      <PageHeader
-        title="Security Dashboard"
-        description="Real-time overview of your security posture"
-        icon={ShieldCheckIcon}
-        breadcrumb={["Dashboard"]}
-        actions={
-          <Link
-            to="/projects?action=new"
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 
-                     text-white font-medium hover:from-blue-600 hover:to-purple-700 
-                     transition-all flex items-center gap-2 shadow-lg hover:shadow-xl
-                     hover:scale-105"
-          >
-            <PlusIcon className="h-4 w-4" />
-            <span>New Project</span>
-          </Link>
-        }
-      />
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-8">
-        {statsCards.map((stat, index) => (
-          <StatCard key={stat.label} stat={stat} index={index} />
-        ))}
-      </div>
-
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* Security Score & Severity - Left Column */}
-        <GlassCard>
-          <SectionHeader
-            title="Security Overview"
-            description="Current security status"
-          />
-
-          <div className="flex flex-col items-center py-4">
-            <SecurityScoreChart
-              score={Math.round(stats?.avgSecurityScore || 85)}
-            />
-            <p className="text-sm text-gray-400 mt-4 text-center">
-              {(stats?.avgSecurityScore || 85) >= 80
-                ? "Your security posture is healthy"
-                : (stats?.avgSecurityScore || 85) >= 60
-                ? "Some issues need attention"
-                : "Critical issues detected"}
-            </p>
-          </div>
-
-          <div className="mt-6 pt-6 border-t border-gray-800/50">
-            <h4 className="text-sm font-medium text-white mb-4">
-              Vulnerability Distribution
-            </h4>
-            <SeverityBar data={severityDistribution} />
-          </div>
-        </GlassCard>
-
-        {/* Quick Actions - Middle Column */}
-        <GlassCard>
-          <SectionHeader
-            title="Quick Actions"
-            description="Common security operations"
-          />
-
-          <div className="grid grid-cols-2 gap-4">
-            {quickActions.map((action, index) => (
-              <QuickAction key={action.name} action={action} index={index} />
-            ))}
-          </div>
-        </GlassCard>
-
-        {/* Recent Scans - Right Column */}
-        <GlassCard>
-          <div className="flex items-center justify-between mb-4">
-            <SectionHeader
-              title="Recent Scans"
-              description="Latest security scans"
-            />
-            <Link
-              to="/reports"
-              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              View all →
-            </Link>
-          </div>
-
-          <div className="space-y-2">
-            {reportsLoading ? (
-              <div className="text-center py-4">
-                <div className="animate-spin h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full mx-auto" />
-              </div>
-            ) : recentReports.length === 0 ? (
-              <div className="text-center py-4">
-                <div className="p-2.5 rounded-xl bg-gray-800/50 inline-block mb-2">
-                  <DocumentChartBarIcon className="h-5 w-5 text-gray-500" />
-                </div>
-                <p className="text-sm text-gray-400">No scans yet</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Create a project to start scanning
-                </p>
-              </div>
-            ) : (
-              recentReports
-                .slice(0, 4)
-                .map((report) => (
-                  <RecentScanItem
-                    key={report.id || report._id}
-                    report={report}
-                    onClick={() =>
-                      navigate(`/report/${report.id || report._id}`)
-                    }
-                  />
-                ))
-            )}
-          </div>
-        </GlassCard>
-      </div>
-
-      {/* Bottom Row - Live Activity */}
-      <GlassCard>
-        <SectionHeader
-          title="Live Activity"
-          description="Real-time notifications and updates"
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={{
+        visible: { transition: { staggerChildren: 0.08 } },
+      }}
+      className="relative min-h-screen"
+    >
+      <ParticleBackground />
+      <PageContainer>
+        <PageHeader
+          title="Security Dashboard"
+          description="Real-time overview of your security posture"
+          icon={ShieldCheckIcon}
+          breadcrumb={["Dashboard"]}
+          actions={
+            <div className="flex items-center gap-3">
+              <button
+                onClick={refresh}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl bg-gray-800/30 border border-gray-700/50 text-gray-300 hover:text-white hover:border-gray-600 hover:bg-gray-800/50 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+              >
+                <ArrowPathIcon className={`w-4 h-4 ${statsFetching ? "animate-spin" : ""}`} />
+                <span>Refresh</span>
+              </button>
+              <Link
+                to="/projects?action=new"
+                className="inline-flex items-center justify-center gap-2 px-8 py-3 text-base font-semibold rounded-full bg-gradient-to-r from-cyan-400 via-violet-500 to-cyan-400 text-white hover:from-cyan-300 hover:via-violet-400 hover:to-cyan-300 shadow-lg hover:shadow-xl hover:shadow-cyan-500/20 transform hover:scale-[1.03] active:scale-[0.98] transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+              >
+                <PlusIcon className="h-5 w-5" />
+                <span>New Project</span>
+              </Link>
+            </div>
+          }
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[200px] overflow-y-auto">
-          {notifications.length === 0 ? (
-            <div className="col-span-full text-center py-8">
-              <div className="p-3 rounded-xl bg-gray-800/50 inline-block mb-3">
-                <BoltIcon className="h-6 w-6 text-gray-500" />
-              </div>
-              <p className="text-sm text-gray-400">No recent activity</p>
-              <p className="text-xs text-gray-500 mt-1">
-                Updates will appear here in real-time
-              </p>
-            </div>
-          ) : (
-            notifications.slice(0, 6).map((notif) => (
+        <DashboardHero securityScore={score} scoreTrend={scoreTrend} />
+
+        {statsLoading ? (
+          <motion.div
+            variants={{
+              hidden: { opacity: 0, y: 15 },
+              visible: { opacity: 1, y: 0 },
+            }}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+          >
+            {Array.from({ length: 4 }).map((_, i) => (
               <div
-                key={notif.id}
-                className="flex items-center gap-3 p-3 rounded-xl bg-gray-800/30 hover:bg-gray-800/50 transition-colors"
+                key={i}
+                className="h-[120px] bg-gray-800/30 rounded-xl animate-pulse p-4 flex flex-col justify-between"
               >
-                <div className="p-2 rounded-lg bg-blue-500/10 flex-shrink-0">
-                  <BoltIcon className="w-4 h-4 text-blue-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white truncate">{notif.message}</p>
-                  <p className="text-xs text-gray-500">
-                    {new Date(notif.timestamp).toLocaleTimeString()}
-                  </p>
-                </div>
+                <div className="h-3 w-24 bg-gray-700/50 rounded-full" />
+                <div className="h-8 w-16 bg-gray-700/50 rounded-lg" />
+                <div className="h-2.5 w-full bg-gray-700/40 rounded-full" />
               </div>
-            ))
-          )}
-        </div>
-      </GlassCard>
-    </PageContainer>
+            ))}
+          </motion.div>
+        ) : (
+          <motion.div
+            variants={{
+              hidden: { opacity: 0, y: 15 },
+              visible: { opacity: 1, y: 0 },
+            }}
+            className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"
+          >
+            <MetricCard
+              title="Projects"
+              value={stats?.totalProjects ?? 0}
+              trend={stats?.projectsTrend}
+              icon={ShieldCheckIcon}
+            />
+            <MetricCard
+              title="Total Scans"
+              value={stats?.totalScans ?? 0}
+              trend={stats?.scansTrend}
+              icon={ArrowPathIcon}
+            />
+            <MetricCard
+              title="Open Issues"
+              value={stats?.openIssues ?? 0}
+              trend={stats?.issuesTrend}
+              icon={BoltIcon}
+              colorClass={
+                stats?.openIssues > 0 ? "from-red-500 to-orange-500" : "from-cyan-400 to-violet-500"
+              }
+            />
+            <MetricCard
+              title="Avg Score"
+              value={score != null ? score : "—"}
+              trend={scoreTrend}
+              icon={ShieldCheckIcon}
+              colorClass={
+                score >= 80
+                  ? "from-emerald-400 to-cyan-500"
+                  : score >= 60
+                    ? "from-yellow-400 to-orange-500"
+                    : "from-red-400 to-rose-500"
+              }
+            />
+          </motion.div>
+        )}
+
+        <motion.div
+          variants={{
+            hidden: { opacity: 0, y: 15 },
+            visible: { opacity: 1, y: 0 },
+          }}
+          className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6"
+        >
+          <GlassCard>
+            <SectionHeader title="Security Overview" description="Score trend over time" />
+            <ScoreTrendChart reports={recentReports} />
+            <div className="mt-4 pt-4 border-t border-gray-800/50">
+              <h4 className="text-sm font-medium text-white mb-3">Vulnerability Distribution</h4>
+              {[
+                {
+                  label: "Critical",
+                  count: severityDistribution.critical || 0,
+                  color: "from-red-500 to-rose-500",
+                },
+                {
+                  label: "High",
+                  count: severityDistribution.high || 0,
+                  color: "from-orange-500 to-amber-500",
+                },
+                {
+                  label: "Medium",
+                  count: severityDistribution.medium || 0,
+                  color: "from-yellow-500 to-lime-500",
+                },
+                {
+                  label: "Low",
+                  count: severityDistribution.low || 0,
+                  color: "from-blue-500 to-cyan-500",
+                },
+              ].map(({ label, count, color }) => (
+                <div key={label} className="flex items-center justify-between text-sm py-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full bg-gradient-to-r ${color}`} />
+                    <span className="text-gray-400">{label}</span>
+                  </div>
+                  <span className="text-white font-medium">{count}</span>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+
+          <GlassCard>
+            <SectionHeader title="Quick Actions" description="Common security operations" />
+            <QuickActions />
+          </GlassCard>
+
+          <GlassCard>
+            <div className="flex items-center justify-between mb-4">
+              <SectionHeader title="Recent Scans" description="Latest security scans" />
+              <Link
+                to="/reports"
+                className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+              >
+                View all →
+              </Link>
+            </div>
+            <RecentScans
+              scans={recentReports}
+              isLoading={reportsLoading}
+              error={reportsError}
+              onRetry={refetchReports}
+            />
+          </GlassCard>
+        </motion.div>
+
+        <motion.div
+          variants={{
+            hidden: { opacity: 0, y: 15 },
+            visible: { opacity: 1, y: 0 },
+          }}
+        >
+          <GlassCard>
+            <SectionHeader
+              title="Live Activity"
+              description="Real-time notifications and updates"
+            />
+            <div className="max-h-[200px] overflow-y-auto space-y-2">
+              {notifications.length === 0 ? (
+                <EmptyState
+                  icon={BoltIcon}
+                  title="No recent activity"
+                  description="Updates will appear here in real-time"
+                />
+              ) : (
+                notifications.slice(0, 6).map((notif) => {
+                  const typeStyle =
+                    notif.type === "scan_completed"
+                      ? "text-emerald-400 bg-emerald-500/10"
+                      : notif.type === "scan_error"
+                        ? "text-red-400 bg-red-500/10"
+                        : notif.type === "scan_started"
+                          ? "text-blue-400 bg-blue-500/10"
+                          : "text-cyan-400 bg-cyan-500/10";
+                  const IconComponent =
+                    notif.type === "scan_completed"
+                      ? ShieldCheckIcon
+                      : notif.type === "scan_error"
+                        ? ArrowPathIcon
+                        : BoltIcon;
+
+                  return (
+                    <motion.div
+                      key={notif.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-gray-800/30 hover:bg-gray-800/50 transition-colors"
+                    >
+                      <div className={`p-2 rounded-lg ${typeStyle} flex-shrink-0`}>
+                        <IconComponent className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-white truncate">{notif.message}</p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(notif.timestamp).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    </motion.div>
+                  );
+                })
+              )}
+            </div>
+          </GlassCard>
+        </motion.div>
+      </PageContainer>
+    </motion.div>
   );
 };
 

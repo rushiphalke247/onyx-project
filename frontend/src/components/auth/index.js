@@ -20,13 +20,14 @@ export { EmailVerification } from "./EmailVerification";
 // Composite Components
 export { UserProfile } from "./UserProfile";
 export { AuthModal } from "./AuthModal";
+export { ProfileInfo } from "./ProfileInfo";
+export { AccountInfo } from "./AccountInfo";
+export { AvatarCropModal } from "./AvatarCropModal";
+export { SecuritySettings } from "./SecuritySettings";
+export { NotificationPreferences } from "./NotificationPreferences";
 
 // Auth Pages
-export {
-  EmailVerificationPage,
-  PasswordResetPage,
-  AuthRoutingHandler,
-} from "./AuthPages";
+export { EmailVerificationPage, PasswordResetPage, AuthRoutingHandler } from "./AuthPages";
 
 // Verification Banner
 export { VerificationBanner } from "./VerificationBanner";

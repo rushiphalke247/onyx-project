@@ -1,12 +1,14 @@
 # FastAPI and ASGI server
-fastapi>=0.104.1
+# fastapi capped: 0.139.x changed include_router internals (nested _IncludedRouter
+# objects), which broke route enumeration in tests and could affect other tooling
+fastapi>=0.104.1,<0.140.0
 uvicorn[standard]>=0.24.0
 gunicorn>=21.2.0
 
-# Database
-motor>=3.3.2
-pymongo>=4.6.0
-beanie>=1.23.3
+# Database - versions pinned for compatibility (PyMongo 4.9+ broke beanie's append_metadata API)
+motor>=3.3.2,<3.6
+pymongo>=4.6.0,<4.9
+beanie>=1.23.3,<1.27
 
 # Security and middleware
 python-jose[cryptography]>=3.3.0
@@ -37,6 +39,9 @@ deepdiff>=8.6.0
 jsonschema>=4.20.0
 PyYAML>=6.0.1
 
+# Authentication / SSO
+google-auth>=2.0.0  # Google ID token verification (Google SSO)
+
 # HTTP client
 httpx>=0.25.2
 
@@ -49,7 +54,10 @@ GitPython>=3.1.40
 
 # AI and Machine Learning
 openai>=1.3.7
-google-generativeai>=0.3.2
+google-genai>=1.0.0
+sqlite-vec>=0.1.0   # Phase 2 RAG: vector search in knowledge.db (spec 2.4)
+pydantic-ai-slim[openai]>=2.54.0,<3   # Phase 3 fix-agent (spec 4.2)
+scikit-learn>=1.5.0   # Phase 4 IsolationForest (spec 2.4, 5.1 P4)
 
 # PDF generation
 reportlab>=4.0.7
@@ -86,7 +94,7 @@ requests>=2.31.0        # HTTP client for API calls
 urllib3>=1.26.0         # URL parsing and validation
 colorlog>=6.7.0         # Colored logging for better visibility
 toml>=0.10.2            # For parsing gitleaks.toml config files
-packaging               # For version parsing in safety checks
+packaging>=24.0         # For version parsing in safety checks
 
 # Notifications
 slack-sdk>=3.26.1
@@ -94,6 +102,8 @@ slack-sdk>=3.26.1
 # Logging and monitoring
 structlog>=23.2.0
 colorama>=0.4.6
+sentry-sdk>=2.66.1
+prometheus-fastapi-instrumentator>=8.1.0
 
 # Date/time utilities
 python-dateutil>=2.8.2
@@ -107,14 +117,8 @@ secure>=0.3.0
 # WebSocket support
 websockets>=12.0
 
-# Process management
-psutil>=5.9.6
-
-# Two-Factor Authentication
-pyotp>=2.9.0
-
-# User Agent Parsing
-user-agents>=2.2.0
+# Scheduled task management
+apscheduler>=3.10.4
 
 # ============================================================================
 # Testing Dependencies
@@ -123,4 +127,3 @@ user-agents>=2.2.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
-httpx>=0.25.0  # For async testing

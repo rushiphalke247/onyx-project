@@ -2,29 +2,40 @@
 Authentication Service for ONYX Security Intelligence Platform
 Handles JWT token generation, validation, password management, and user sessions
 """
-import secrets
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, Tuple
+import secrets
 import uuid
-import jwt
-import bcrypt
-import pyotp
-from fastapi import HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 
-# Import timezone-aware UTC datetime helper
-from utils.datetime_utils import utc_now
-from fastapi import Request, Depends
+import bcrypt
+import jwt
+import pyotp
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from google.oauth2 import id_token as google_id_token
+from pymongo.errors import DuplicateKeyError
 
 from config import settings
 from models.user import (
-    User, UserSession, APIToken, UserRole, UserStatus,
-    LoginRequest, LoginResponse, UserResponse, 
-    PasswordResetRequest, PasswordResetConfirm,
-    UserCreate, UserPasswordChange
+    APIToken,
+    LoginRequest,
+    LoginResponse,
+    PasswordResetConfirm,
+    SsoNonce,
+    User,
+    UserCreate,
+    UserPasswordChange,
+    UserResponse,
+    UserRole,
+    UserSession,
+    UserStatus,
 )
+
+# Import timezone-aware UTC datetime helper
+from utils.datetime_utils import utc_now, ensure_utc
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +132,14 @@ class AuthService:
     
     async def authenticate_user(self, username_or_email: str, password: str) -> Optional[User]:
         """Authenticate user by username/email and password"""
+        # Check if Beanie ODM is initialized (prevents CollectionWasNotInitialized crash)
+        from database import beanie_initialized
+        if not beanie_initialized:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database is not available. Please try again in a few moments."
+            )
+        
         # Find user by username or email
         user = await User.find_one({
             "$or": [
@@ -134,7 +153,7 @@ class AuthService:
         
         # Check if account is locked - BRUTE FORCE PROTECTION
         if user.is_account_locked():
-            remaining_time = user.locked_until - utc_now()
+            remaining_time = ensure_utc(user.locked_until) - utc_now()
             minutes_remaining = max(1, int(remaining_time.total_seconds() / 60))
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
@@ -181,7 +200,19 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
-        
+
+        # Email verification gate - enforce only for PENDING_VERIFICATION
+        # accounts so legacy/admin-activated (ACTIVE) users are not locked out.
+        if (
+            settings.require_email_verification
+            and user.status == UserStatus.PENDING_VERIFICATION
+            and not user.is_email_verified
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email verification required. Please verify your email to log in, or request a new verification link."
+            )
+
         # Check if 2FA is enabled for this user
         if user.two_factor_enabled:
             if not login_data.two_factor_code:
@@ -216,6 +247,10 @@ class AuthService:
         user.last_login = utc_now()
         await user.save()
         
+        return await self._build_login_response(user, request)
+    
+    async def _build_login_response(self, user: User, request: Request) -> LoginResponse:
+        """Create tokens + session for an authenticated user (shared by password and SSO logins)"""
         # Create tokens
         access_token = self.create_access_token(user.id)
         refresh_token = self.create_refresh_token(user.id)
@@ -225,7 +260,7 @@ class AuthService:
         refresh_expires_at = utc_now() + timedelta(days=self.refresh_token_expire)
         
         session = UserSession(
-            user_id=user.id,
+            user_id=str(user.id),
             access_token=access_token,
             refresh_token=refresh_token,
             expires_at=expires_at,
@@ -264,6 +299,253 @@ class AuthService:
             user=UserResponse(**user.dict())
         )
     
+    # Google SSO
+    
+    def verify_google_id_token(self, id_token_str: str, nonce: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Verify a Google Identity Services ID token.
+        Validates signature, audience, issuer, email_verified, and optional nonce.
+        Returns the decoded claims dict or raises HTTPException.
+        """
+        if not settings.google_sso_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Google SSO is not configured"
+            )
+
+        try:
+            info = google_id_token.verify_oauth2_token(
+                id_token_str,
+                GoogleAuthRequest(),
+                settings.google_client_id
+            )
+        except ValueError as e:
+            logger.warning(f"Invalid Google ID token: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Google authentication token"
+            )
+        except Exception as e:
+            logger.error(f"Google ID token verification failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google authentication failed"
+            )
+
+        # Issuer check (defense in depth; google-auth checks audience + signature)
+        if info.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Google token issuer"
+            )
+
+        # Only accept email-verified Google accounts
+        if info.get("email_verified") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Google account email is not verified"
+            )
+
+        email = (info.get("email") or "").lower()
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google token is missing an email address"
+            )
+
+        # The nonce is server-issued, single-use, and must match the one embedded
+        # in the ID token by the Google Identity Services client. This binds the
+        # token to the exact login page session that requested it, so a captured
+        # ID token cannot be replayed against a different session.
+        if not nonce:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google SSO requires a nonce"
+            )
+        if not info.get("nonce") or info.get("nonce") != nonce:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google token nonce mismatch"
+            )
+
+        # Optional domain allowlist
+        allowed_domains = [d.strip().lower() for d in settings.google_allowed_domains.split(",") if d.strip()]
+        if allowed_domains and email.split("@")[-1] not in allowed_domains:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your Google account domain is not allowed to sign in"
+            )
+
+        return info
+
+    async def issue_sso_nonce(self) -> str:
+        """Issue a server-side, single-use nonce for the Google SSO login flow."""
+        nonce = secrets.token_urlsafe(32)
+        await SsoNonce(
+            nonce=nonce,
+            expires_at=utc_now() + timedelta(minutes=10),
+        ).insert()
+        return nonce
+
+    async def consume_sso_nonce(self, nonce: str) -> None:
+        """Validate and single-use consume a server-issued SSO nonce."""
+        if not nonce:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google SSO requires a nonce"
+            )
+        doc = await SsoNonce.find_one(SsoNonce.nonce == nonce)
+        if not doc or doc.used or ensure_utc(doc.expires_at) < utc_now():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired Google SSO nonce"
+            )
+        doc.used = True
+        await doc.save()
+
+    async def google_login(self, id_token_str: str, two_factor_code: Optional[str], request: Request, nonce: Optional[str] = None):
+        """
+        Log in (or auto-register) a user via a verified Google ID token.
+        Returns LoginResponse, or a requires_2fa dict when the user has 2FA enabled.
+        """
+        # Check if Beanie ODM is initialized (prevents CollectionWasNotInitialized crash)
+        from database import beanie_initialized
+        if not beanie_initialized:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database is not available. Please try again in a few moments."
+            )
+
+        # The server-issued nonce proves this Google token was minted for this
+        # login session. It is consumed only when login COMPLETES (single-use), so
+        # the 2FA round-trip can present the same (id_token, nonce) pair twice;
+        # once completed, a replayed pair can never be accepted again.
+        info = self.verify_google_id_token(id_token_str, nonce)
+        email = (info.get("email") or "").lower()
+
+        user = await User.find_one({"email": email})
+
+        if not user:
+            # Auto-provisioning is gated the same way as password registration,
+            # so enabling SSO can never silently re-open self-registration.
+            if not settings.allow_registration:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Registration is disabled. Contact your administrator for an account."
+                )
+
+            # Auto-provision a Google SSO account. Google already verified the email,
+            # so the account is ACTIVE immediately with a non-guessable placeholder
+            # password that can never authenticate (bcrypt hash of random bytes).
+            username = await self._derive_username(email)
+            user = User(
+                email=email,
+                username=username,
+                full_name=(info.get("name") or "").strip() or username,
+                hashed_password=self.hash_password(secrets.token_urlsafe(32)),
+                auth_provider="google",
+                role=UserRole.VIEWER,
+                status=UserStatus.ACTIVE,
+                is_email_verified=True,
+                avatar_url=info.get("picture"),
+                last_login=utc_now(),
+            )
+            try:
+                await user.insert()
+            except DuplicateKeyError:
+                # Concurrent provisioning for the same email: another request
+                # created the account. Bind to it instead of failing with a 500.
+                raced = await User.find_one({"email": email})
+                if raced is not None:
+                    user = raced
+                else:
+                    # Rare username race; retry once with a random suffix.
+                    user.username = f"{username}{secrets.randbelow(9999)}"
+                    await user.insert()
+                    logger.info(f"Auto-provisioned Google SSO account for {email}")
+                    await self.consume_sso_nonce(nonce or "")
+                    return await self._build_login_response(user, request)
+            else:
+                logger.info(f"Auto-provisioned Google SSO account for {email}")
+                await self.consume_sso_nonce(nonce or "")
+                return await self._build_login_response(user, request)
+
+        # Existing account: enforce the same gates as password login
+        if user.status not in [UserStatus.ACTIVE, UserStatus.PENDING_VERIFICATION]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is suspended or inactive"
+            )
+        if user.is_account_locked():
+            remaining_time = ensure_utc(user.locked_until) - utc_now()
+            minutes_remaining = max(1, int(remaining_time.total_seconds() / 60))
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Account is locked due to too many failed attempts. Try again in {minutes_remaining} minutes."
+            )
+
+        # Email verification gate: a PENDING_VERIFICATION account (e.g. self-registered,
+        # admin-created) must verify its email before it can be bound to a Google login.
+        if (
+            settings.require_email_verification
+            and user.status == UserStatus.PENDING_VERIFICATION
+            and not user.is_email_verified
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email verification required. Please verify your email to log in, or request a new verification link."
+            )
+
+        # 2FA gate: SSO identity is verified, but the user may still require a TOTP code
+        if user.two_factor_enabled:
+            if not two_factor_code:
+                temp_token = self._generate_2fa_temp_token(user.id)
+                return {
+                    "requires_2fa": True,
+                    "message": "Two-factor authentication required",
+                    "temp_token": temp_token,
+                    "user_email": self._mask_email(user.email)
+                }
+
+            totp = pyotp.TOTP(user.two_factor_secret)
+            is_valid = totp.verify(two_factor_code, valid_window=1)
+            if not is_valid and two_factor_code.upper() in user.two_factor_backup_codes:
+                is_valid = True
+                user.two_factor_backup_codes.remove(two_factor_code.upper())
+
+            if not is_valid:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid two-factor authentication code"
+                )
+
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        user.last_login = utc_now()
+        await user.save()
+
+        await self.consume_sso_nonce(nonce or "")
+        return await self._build_login_response(user, request)
+
+    async def _derive_username(self, email: str) -> str:
+        """Derive a unique username from an email address (e.g. jane.doe@x.com -> jane.doe)"""
+        base = email.split("@")[0].strip().lower() or "user"
+        base = "".join(c for c in base if c.isalnum() or c in "-_")[:30]
+        # The username validator requires >= 3 chars; pad short local parts
+        if len(base) < 3:
+            base = f"{base}{secrets.randbelow(100)}" if base else f"user{secrets.randbelow(1000)}"
+        candidate = base
+        suffix = 1
+        while True:
+            try:
+                existing = await User.find_one({"username": candidate})
+            except Exception:
+                return candidate
+            if existing is None:
+                return candidate
+            suffix += 1
+            candidate = f"{base}{suffix}"
+
     async def refresh_access_token(self, refresh_token: str) -> Dict[str, Any]:
         """Refresh access token using refresh token"""
         payload = self.verify_token(refresh_token, "refresh")
@@ -282,7 +564,7 @@ class AuthService:
             "is_active": True
         })
         
-        if not session or session.refresh_expires_at < utc_now():
+        if not session or ensure_utc(session.refresh_expires_at) < utc_now():
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired refresh token"
@@ -346,8 +628,11 @@ class AuthService:
     
     async def create_user(self, user_data: UserCreate, created_by: Optional[str] = None) -> User:
         """Create new user account"""
+        # Normalize to lowercase so SSO lookups (which always lowercase) match
+        normalized_email = str(user_data.email).lower()
+
         # Check if email exists
-        existing_email = await User.find_one({"email": user_data.email})
+        existing_email = await User.find_one({"email": normalized_email})
         if existing_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -367,7 +652,7 @@ class AuthService:
         
         # Create user
         user = User(
-            email=user_data.email,
+            email=normalized_email,
             username=user_data.username.lower(),
             full_name=user_data.full_name,
             hashed_password=hashed_password,
@@ -480,7 +765,10 @@ class AuthService:
                 detail="User not found"
             )
         
-        if user.status != UserStatus.ACTIVE:
+        if user.status != UserStatus.ACTIVE and not (
+            user.status == UserStatus.PENDING_VERIFICATION
+            and not settings.require_email_verification
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is not active"
@@ -751,7 +1039,7 @@ class AuthService:
             return None
         
         # Check expiration
-        if api_token.expires_at and api_token.expires_at < utc_now():
+        if api_token.expires_at and ensure_utc(api_token.expires_at) < utc_now():
             return None
         
         # Update usage stats
@@ -768,7 +1056,7 @@ class AuthService:
     async def send_verification_email(self, email: str, verification_token: str):
         """Send email verification link"""
         try:
-            from services.notifications.email_service import email_service
+            from services.notifications.service import email_service
             success = await email_service.send_verification_email(email, verification_token)
             
             if success:
@@ -783,7 +1071,7 @@ class AuthService:
     async def send_password_reset_email(self, email: str, reset_token: str):
         """Send password reset link"""
         try:
-            from services.notifications.email_service import email_service
+            from services.notifications.service import email_service
             success = await email_service.send_password_reset_email(email, reset_token)
             
             if success:
@@ -798,7 +1086,7 @@ class AuthService:
     async def send_welcome_email(self, email: str, user_name: str):
         """Send welcome email to new users"""
         try:
-            from services.notifications.email_service import email_service
+            from services.notifications.service import email_service
             success = await email_service.send_welcome_email(email, user_name)
             
             if success:

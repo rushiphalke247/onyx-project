@@ -1,6 +1,24 @@
-/**
- * Projects Components - Project management and details
- */
-export { default as ProjectList } from "./ProjectList";
 export { default as ProjectManagement } from "./ProjectManagement";
 export { default as ProjectDetails } from "./ProjectDetails";
+export { default as ProjectCard } from "./ProjectCard";
+export { default as ProjectRow } from "./ProjectRow";
+export { default as ProjectForm } from "./ProjectForm";
+export { default as ProjectFilters } from "./ProjectFilters";
+export { default as ProjectGrid } from "./ProjectGrid";
+export { default as ProjectStatsBar } from "./ProjectStatsBar";
+export { default as ProjectDeleteDialog } from "./ProjectDeleteDialog";
+export { default as ParticleBackground } from "./ParticleBackground";
+export { default as SecurityScoreGlobe } from "./SecurityScoreGlobe";
+export { default as ScanPipeline } from "./ScanPipeline";
+export { default as LiveConsole } from "./LiveConsole";
+export { default as MetricCard } from "./MetricCard";
+export { default as MetricsDashboard } from "./MetricsDashboard";
+export { default as SecurityRadar } from "./SecurityRadar";
+export { default as VulnerabilityMatrix } from "./VulnerabilityMatrix";
+export { default as ActivityTimeline } from "./ActivityTimeline";
+export { default as OverviewTab } from "./OverviewTab";
+export { default as ScanHistoryTab } from "./ScanHistoryTab";
+export { default as SettingsTab } from "./SettingsTab";
+export { default as ProjectSidebar } from "./ProjectSidebar";
+export { default as EditProjectModal } from "./EditProjectModal";
+export { default as DeleteProjectModal } from "./DeleteProjectModal";

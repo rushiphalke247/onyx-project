@@ -2,21 +2,35 @@
 MongoDB Database Connection and Models
 Handles connection to MongoDB Atlas and data operations
 """
-import os
-import asyncio
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import ServerSelectionTimeoutError, DuplicateKeyError
-from beanie import init_beanie
 import logging
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-# Import all models
-from models.report import ScanReport, WebhookEvent, ScannerHealth
-from models.user import User, UserSession, APIToken
+from beanie import init_beanie
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import ServerSelectionTimeoutError
+
 from models.project import Project
 
+# Import all models
+from models.report import ScannerHealth
+from models.user import APIToken, SsoNonce, User, UserSession
+
 logger = logging.getLogger(__name__)
+
+# Track whether Beanie ODM has been initialized
+beanie_initialized = False
+
+async def require_beanie():
+    """FastAPI dependency that ensures Beanie ODM is initialized.
+    Returns 503 if the database connection/Beanie init failed."""
+    if not beanie_initialized:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail="Database is not available. Please try again in a few moments."
+        )
 
 class DatabaseManager:
     def __init__(self):
@@ -35,15 +49,33 @@ class DatabaseManager:
                 
             # Replace placeholder with actual password if needed
             if '<db_password>' in mongodb_uri:
-                db_password = os.getenv('MONGO_PASSWORD', 'your-password')
+                db_password = os.getenv('MONGO_PASSWORD')
+                if not db_password:
+                    logger.error("MONGO_PASSWORD environment variable is required when MONGODB_URI contains <db_password> placeholder")
+                    return False
                 mongodb_uri = mongodb_uri.replace('<db_password>', db_password)
+            
+            # Normalize TLS parameters: tlsInsecure is not a valid PyMongo URI option
+            # Replace with the correct tlsAllowInvalidCertificates parameter
+            mongodb_uri = mongodb_uri.replace('tlsInsecure=true', 'tlsAllowInvalidCertificates=true')
+            
+            # Log connection attempt (mask password)
+            safe_uri = mongodb_uri
+            if ':' in safe_uri and '@' in safe_uri:
+                # Mask password in URI for logging
+                parts = safe_uri.split('@')
+                creds = parts[0].split(':')
+                if len(creds) > 1:
+                    creds[1] = '***'
+                    safe_uri = ':'.join(creds) + '@' + parts[1]
+            logger.info(f"Connecting to MongoDB: {safe_uri}")
             
             # Create client with timeout settings
             self.client = AsyncIOMotorClient(
                 mongodb_uri,
-                serverSelectionTimeoutMS=5000,  # 5 second timeout
-                connectTimeoutMS=10000,         # 10 second timeout
-                maxPoolSize=10,                 # Maximum 10 connections
+                serverSelectionTimeoutMS=15000,  # 15 second timeout (Atlas cold start)
+                connectTimeoutMS=20000,          # 20 second connect timeout
+                maxPoolSize=10,
                 retryWrites=True
             )
             
@@ -66,7 +98,8 @@ class DatabaseManager:
             self.connected = False
             return False
         except Exception as e:
-            logger.error(f"❌ MongoDB connection error: {e} - database will not be available")
+            logger.error(f"❌ MongoDB connection error: {type(e).__name__}: {e}")
+            logger.error("❌ Database will not be available - login and Beanie features disabled")
             self.connected = False
             return False
     
@@ -260,12 +293,28 @@ class DatabaseManager:
             
             severity_distribution = {item['_id']: item['count'] for item in severity_data}
             
+            # Calculate real security score based on findings severity distribution
+            total_findings = sum(severity_distribution.values()) if severity_distribution else 0
+            if total_findings > 0 and completed_scans > 0:
+                # Weighted penalty: critical=-20, high=-10, medium=-3, low=-1 per finding, normalized per scan
+                critical_count = severity_distribution.get('critical', 0)
+                high_count = severity_distribution.get('high', 0)
+                medium_count = severity_distribution.get('medium', 0)
+                low_count = severity_distribution.get('low', 0)
+                
+                penalty = (critical_count * 20 + high_count * 10 + medium_count * 3 + low_count * 1)
+                avg_penalty_per_scan = penalty / completed_scans
+                # Score starts at 100, deducted by average penalty, floored at 0
+                average_security_score = round(max(0.0, min(100.0, 100.0 - avg_penalty_per_scan)), 1)
+            else:
+                average_security_score = None  # No data to calculate from
+            
             return {
                 "total_scans": total_scans,
                 "completed_scans": completed_scans,
                 "severity_distribution": severity_distribution,
-                "projects_scanned": total_scans,  # Simplified
-                "average_security_score": 85.0   # Calculated based on findings
+                "projects_scanned": total_scans,
+                "average_security_score": average_security_score
             }
             
         except Exception as e:
@@ -373,21 +422,38 @@ async def init_database():
         
         # Import document models
         from models.report import ScanReport, WebhookEvent
+        from models.schedule import ScanSchedule
         
         # Initialize Beanie using the existing db_manager connection (no duplicate client)
         await init_beanie(
             database=db_manager.db,
-            document_models=[ScanReport, WebhookEvent, ScannerHealth, User, UserSession, APIToken, Project]
+            document_models=[ScanReport, WebhookEvent, ScannerHealth, User, UserSession, APIToken, Project, ScanSchedule, SsoNonce]
         )
         
+        # TTL index: auto-expire consumed/abandoned SSO nonces 10 minutes after issuance
+        try:
+            await SsoNonce.get_motor_collection().create_index(
+                "expires_at", expireAfterSeconds=0
+            )
+        except Exception as e:
+            logger.warning(f"Could not create SSO nonce TTL index: {e}")
+        
         beanie_connected = True
+        global beanie_initialized
+        beanie_initialized = True
         logger.info("✅ Beanie ODM initialized successfully (using shared connection)")
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Beanie ODM: {e}")
+        import traceback
+        logger.error(f"❌ Failed to initialize Beanie ODM: {type(e).__name__}: {e}")
+        logger.error(f"❌ Beanie init traceback: {traceback.format_exc()}")
         beanie_connected = False
     
-    return manager_connected and beanie_connected
+    result = manager_connected and beanie_connected
+    if not result:
+        logger.error(f"❌ Database init incomplete - manager_connected={manager_connected}, beanie_connected={beanie_connected}")
+        logger.error("❌ Auth features (login/register) will NOT work until database is available")
+    return result
 
 async def close_database():
     """Close database connection"""

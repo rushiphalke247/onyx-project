@@ -1,26 +1,121 @@
 """
 Git repository cloning utilities
 """
-import os
-import shutil
 import asyncio
+import ipaddress
 import logging
-from typing import Optional, Dict, Any
-from pathlib import Path
+import re
+import shutil
+import socket
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
-import git
-from git import Repo, InvalidGitRepositoryError, GitCommandError
+from git import GitCommandError, InvalidGitRepositoryError, Repo
 
 from config import settings
 from utils.datetime_utils import utc_now
+from utils.scrub import scrub_text
+from utils.url_redaction import strip_url_credentials
 
 logger = logging.getLogger(__name__)
+
+# Schemes we are willing to clone over (file:// and plain local paths are rejected)
+ALLOWED_GIT_SCHEMES = ("https", "http", "ssh", "git")
 
 
 class RepoCloneError(Exception):
     """Custom exception for repository cloning errors"""
     pass
+
+
+def _is_private_host(host: str) -> bool:
+    """Return True if host resolves to a loopback/private/link-local/reserved address."""
+    try:
+        ip = ipaddress.ip_address(host)
+        candidates = [ip]
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except socket.gaierror:
+            # Unresolvable hostnames are allowed; git will fail later if truly invalid.
+            return False
+        candidates = [info[4][0] for info in infos if info and len(info) > 4 and info[4]]
+
+    for candidate in candidates:
+        try:
+            ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+def validate_repo_url(repo_url: str) -> None:
+    """
+    Validate a repository URL before cloning to prevent SSRF and local-file access.
+
+    Raises RepoCloneError for disallowed schemes, local paths, and private hosts.
+    """
+    url = (repo_url or "").strip()
+    if not url:
+        raise RepoCloneError("Repository URL is required")
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        raise RepoCloneError("Invalid repository URL") from None
+    if parsed.scheme:
+        scheme = parsed.scheme.lower()
+        if scheme not in ALLOWED_GIT_SCHEMES:
+            raise RepoCloneError(f"Unsupported repository URL scheme: {parsed.scheme}")
+        if scheme in ("http", "https", "git") and (
+            parsed.username is not None or parsed.password is not None
+        ):
+            raise RepoCloneError(
+                "Repository URL must not embed credentials - use a project access token"
+            )
+        if scheme == "ssh" and parsed.password is not None:
+            raise RepoCloneError(
+                "Repository URL must not embed credentials - use a project access token"
+            )
+        if scheme == "ssh":
+            userinfo = parsed.netloc.rsplit("@", 1)[0] if "@" in parsed.netloc else ""
+            if parsed.netloc.count("@") > 1 or "%40" in userinfo.lower():
+                raise RepoCloneError(
+                    "Repository URL must not embed credentials - use a project access token"
+                )
+        host = parsed.hostname
+        if not host:
+            raise RepoCloneError("Repository URL has no host")
+        if _is_private_host(host):
+            raise RepoCloneError(f"Repository host is not allowed: {host}")
+    else:
+        # scp-like syntax: git@github.com:owner/repo.git OR a local path
+        at_parts = url.split("@")
+        if len(at_parts) > 2:
+            raise RepoCloneError(
+                "Repository URL must not embed credentials - use a project access token"
+            )
+        user_host = at_parts[-1]
+        if ":" in user_host and not user_host.startswith(":"):
+            if user_host.startswith("[") and "]:" in user_host:
+                host = user_host[1 : user_host.index("]:")]
+            else:
+                host = user_host.split(":", 1)[0]
+            if _is_private_host(host):
+                raise RepoCloneError(f"Repository host is not allowed: {host}")
+        else:
+            raise RepoCloneError("Repository URL must be a remote git URL (no local paths)")
 
 
 class GitRepoCloner:
@@ -32,26 +127,25 @@ class GitRepoCloner:
     
     def _get_repo_name(self, repo_url: str) -> str:
         """Extract repository name from URL"""
-        # Handle various Git URL formats
-        if repo_url.endswith('.git'):
-            repo_url = repo_url[:-4]
-        
-        if '/' in repo_url:
-            return repo_url.split('/')[-1]
-        
-        return repo_url
-    
+        raw = repo_url.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+        if "://" in raw:
+            path = urlparse(raw).path
+        elif "@" in raw and ":" in raw.rsplit("@", 1)[-1]:
+            path = raw.rsplit("@", 1)[-1].split(":", 1)[1]
+        else:
+            path = raw
+        path = path.replace("\\", "/")
+        name = path.rsplit("/", 1)[-1]
+        if name.endswith(".git"):
+            name = name[:-4]
+        return name
+
     def _sanitize_path(self, path: str) -> str:
         """Sanitize path for filesystem safety"""
-        # Remove or replace unsafe characters
-        unsafe_chars = ['<', '>', ':', '"', '|', '?', '*', '\0']
-        for char in unsafe_chars:
-            path = path.replace(char, '_')
-        
-        # Remove leading/trailing dots and spaces
-        path = path.strip('. ')
-        
-        return path
+        path = path.replace("\\", "_").replace("/", "_")
+        path = re.sub(r"[^A-Za-z0-9._-]", "_", path)
+        path = re.sub(r"\.{2,}", "_", path).strip(". ")
+        return path or "repo"
     
     async def clone_repository(
         self,
@@ -72,15 +166,21 @@ class GitRepoCloner:
         Returns:
             Dict containing clone information and local path
         """
+        validate_repo_url(repo_url)
+
         repo_name = self._get_repo_name(repo_url)
         sanitized_name = self._sanitize_path(repo_name)
         
         # Create unique directory with timestamp
         timestamp = utc_now().strftime("%Y%m%d_%H%M%S_%f")
         clone_dir = self.base_temp_dir / f"{sanitized_name}_{timestamp}"
+        try:
+            clone_dir.resolve().relative_to(self.base_temp_dir.resolve())
+        except ValueError:
+            raise RepoCloneError("Invalid repository name") from None
         
         try:
-            logger.info(f"Cloning repository {repo_url} to {clone_dir}")
+            logger.info(f"Cloning repository {scrub_text(repo_url, limit=500)} to {clone_dir}")
             
             # Prepare clone options
             clone_kwargs = {
@@ -92,24 +192,42 @@ class GitRepoCloner:
             # Remove None values
             clone_kwargs = {k: v for k, v in clone_kwargs.items() if v is not None}
             
-            # Clone the repository
-            repo = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: Repo.clone_from(repo_url, clone_dir, **clone_kwargs)
-            )
+            # Clone the repository (bounded by configured timeout)
+            try:
+                repo = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: Repo.clone_from(repo_url, clone_dir, **clone_kwargs)
+                    ),
+                    timeout=settings.git_clone_timeout,
+                )
+            except asyncio.TimeoutError:
+                self._cleanup_directory(clone_dir)
+                raise RepoCloneError(
+                    f"Repository clone timed out after {settings.git_clone_timeout} seconds"
+                ) from None
             
             # Checkout specific commit if provided
             if commit_hash:
                 logger.info(f"Checking out commit {commit_hash}")
-                await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: repo.git.checkout(commit_hash)
-                )
+                try:
+                    await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: repo.git.checkout(commit_hash)
+                        ),
+                        timeout=settings.git_clone_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self._cleanup_directory(clone_dir)
+                    raise RepoCloneError(
+                        f"Commit checkout timed out after {settings.git_clone_timeout} seconds"
+                    ) from None
             
             # Get repository metadata
             head_commit = repo.head.commit
             metadata = {
-                'repository_url': repo_url,
+                'repository_url': strip_url_credentials(repo_url),
                 'local_path': str(clone_dir),
                 'branch': branch or repo.active_branch.name,
                 'commit_hash': head_commit.hexsha,
@@ -127,19 +245,19 @@ class GitRepoCloner:
             return metadata
             
         except GitCommandError as e:
-            error_msg = f"Git command failed: {e}"
+            error_msg = f"Git command failed: {scrub_text(e, limit=500)}"
             logger.error(error_msg)
             self._cleanup_directory(clone_dir)
             raise RepoCloneError(error_msg) from e
             
         except InvalidGitRepositoryError as e:
-            error_msg = f"Invalid git repository: {e}"
+            error_msg = f"Invalid git repository: {scrub_text(e, limit=500)}"
             logger.error(error_msg)
             self._cleanup_directory(clone_dir)
             raise RepoCloneError(error_msg) from e
             
         except Exception as e:
-            error_msg = f"Unexpected error during clone: {e}"
+            error_msg = f"Unexpected error during clone: {scrub_text(e, limit=500)}"
             logger.error(error_msg)
             self._cleanup_directory(clone_dir)
             raise RepoCloneError(error_msg) from e

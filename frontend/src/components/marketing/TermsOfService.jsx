@@ -2,6 +2,7 @@
  * Terms of Service Page - ONYX Security Platform
  * Professional terms with real content
  */
+import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import {
   DocumentTextIcon,
@@ -209,7 +210,12 @@ Violation of these terms may result in immediate termination of your account.`,
       </header>
 
       {/* Content */}
-      <main className="pt-24 pb-16">
+      <motion.main
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="pt-24 pb-16"
+      >
         <div className="max-w-4xl mx-auto px-6">
           {/* Title */}
           <div className="text-center mb-12">
@@ -217,34 +223,39 @@ Violation of these terms may result in immediate termination of your account.`,
               <ScaleIcon className="w-4 h-4 text-violet-400" />
               <span className="text-sm text-violet-400">Legal</span>
             </div>
-            <h1 className="text-4xl md:text-5xl font-bold mb-4">
-              Terms of Service
-            </h1>
+            <h1 className="text-4xl md:text-5xl font-bold mb-4">Terms of Service</h1>
             <p className="text-gray-400">
               Effective: {effectiveDate} | Last updated: {lastUpdated}
             </p>
           </div>
 
           {/* Important Notice */}
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6 mb-12">
+          <motion.div
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+            className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6 mb-12"
+          >
             <div className="flex items-start gap-4">
               <ExclamationTriangleIcon className="w-6 h-6 text-amber-400 flex-shrink-0 mt-0.5" />
               <div>
-                <h3 className="font-semibold text-amber-400 mb-2">
-                  Important Notice
-                </h3>
+                <h3 className="font-semibold text-amber-400 mb-2">Important Notice</h3>
                 <p className="text-gray-400 text-sm">
-                  Please read these Terms carefully before using ONYX. By using
-                  our Service, you acknowledge that you have read, understood,
-                  and agree to be bound by these Terms. If you do not agree,
-                  please do not use the Service.
+                  Please read these Terms carefully before using ONYX. By using our Service, you
+                  acknowledge that you have read, understood, and agree to be bound by these Terms.
+                  If you do not agree, please do not use the Service.
                 </p>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* Table of Contents */}
-          <div className="bg-gray-900/50 border border-gray-800/50 rounded-2xl p-6 mb-12">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.15 }}
+            className="bg-gray-900/50 border border-gray-800/50 rounded-2xl p-6 mb-12"
+          >
             <h2 className="text-lg font-semibold mb-4">Table of Contents</h2>
             <ul className="grid md:grid-cols-2 gap-2">
               {sections.map((section, i) => (
@@ -259,18 +270,29 @@ Violation of these terms may result in immediate termination of your account.`,
                 </li>
               ))}
             </ul>
-          </div>
+          </motion.div>
 
           {/* Sections */}
-          <div className="space-y-12">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={{
+              visible: { transition: { staggerChildren: 0.06 } },
+            }}
+            className="space-y-12"
+          >
             {sections.map((section, index) => (
-              <section
+              <motion.section
                 key={section.id}
+                variants={{
+                  hidden: { opacity: 0, y: 15 },
+                  visible: { opacity: 1, y: 0 },
+                }}
                 id={section.id}
                 className="scroll-mt-24"
               >
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20">
+                  <div className="p-2 rounded-xl bg-gradient-to-br from-violet-500/20 to-cyan-500/20">
                     <section.icon className="w-5 h-5 text-violet-400" />
                   </div>
                   <h2 className="text-2xl font-bold">
@@ -284,33 +306,31 @@ Violation of these terms may result in immediate termination of your account.`,
                       className="text-gray-400 leading-relaxed mb-4 whitespace-pre-line"
                       dangerouslySetInnerHTML={{
                         __html: paragraph
-                          .replace(
-                            /\*\*(.*?)\*\*/g,
-                            "<strong class='text-white'>$1</strong>"
-                          )
-                          .replace(
-                            /• /g,
-                            "<span class='text-violet-400'>•</span> "
-                          ),
+                          .replace(/\*\*(.*?)\*\*/g, "<strong class='text-white'>$1</strong>")
+                          .replace(/• /g, "<span class='text-violet-400'>•</span> "),
                       }}
                     />
                   ))}
                 </div>
-              </section>
+              </motion.section>
             ))}
-          </div>
+          </motion.div>
 
           {/* Contact */}
-          <div className="mt-16 p-8 bg-gradient-to-br from-gray-800/50 to-gray-900/50 border border-gray-700/50 rounded-2xl text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.3 }}
+            className="mt-16 p-8 bg-gradient-to-br from-gray-800/50 to-gray-900/50 border border-gray-700/50 rounded-2xl text-center"
+          >
             <h3 className="text-xl font-bold mb-2">Questions About Terms?</h3>
             <p className="text-gray-400 mb-6">
-              Contact our legal team for any questions about these Terms of
-              Service.
+              Contact our legal team for any questions about these Terms of Service.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <a
                 href="mailto:legal@onyx-security.io"
-                className="px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold hover:shadow-lg hover:shadow-violet-500/25 transition-all"
+                className="px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white font-semibold hover:shadow-lg hover:shadow-violet-500/25 transition-all"
               >
                 Contact Legal Team
               </a>
@@ -321,12 +341,17 @@ Violation of these terms may result in immediate termination of your account.`,
                 Back to Home
               </Link>
             </div>
-          </div>
+          </motion.div>
         </div>
-      </main>
+      </motion.main>
 
       {/* Simple Footer */}
-      <footer className="border-t border-gray-800/50 py-8">
+      <motion.footer
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4, delay: 0.4 }}
+        className="border-t border-gray-800/50 py-8"
+      >
         <div className="max-w-5xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-gray-500 text-sm">
             © {new Date().getFullYear()} ONYX Security Intelligence
@@ -335,15 +360,12 @@ Violation of these terms may result in immediate termination of your account.`,
             <Link to="/terms" className="text-violet-400">
               Terms of Service
             </Link>
-            <Link
-              to="/legal"
-              className="text-gray-500 hover:text-gray-300 transition-colors"
-            >
+            <Link to="/legal" className="text-gray-500 hover:text-gray-300 transition-colors">
               Privacy Policy
             </Link>
           </div>
         </div>
-      </footer>
+      </motion.footer>
     </div>
   );
 };

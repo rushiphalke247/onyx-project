@@ -3,41 +3,38 @@
  * Compare two security scans to show fixed, new, and unchanged vulnerabilities
  * Features: delta analysis, remediation tracking, regression detection
  */
-import React, { useState } from "react";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import {
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  ArrowRight,
-  ArrowUpDown,
-  RefreshCw,
-  FileText,
-  GitBranch,
-  Clock,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-  Filter,
-  ChevronDown,
-  ChevronRight,
-  Download,
-  ExternalLink,
-} from "lucide-react";
+  CheckCircleIcon,
+  XCircleIcon,
+  ExclamationTriangleIcon,
+  ArrowRightIcon,
+  ArrowsUpDownIcon,
+  ArrowPathIcon,
+  DocumentTextIcon,
+  ArrowsRightLeftIcon,
+  ArrowTrendingUpIcon,
+  ArrowTrendingDownIcon,
+  MinusIcon,
+  FunnelIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ArrowDownTrayIcon,
+} from "@heroicons/react/24/outline";
 
-// API Configuration - Production ready with environment variable support
-const API_BASE_URL = import.meta.env.DEV
-  ? "http://127.0.0.1:8000"
-  : import.meta.env.VITE_API_URL || "/api";
+import { Card } from "@styles";
+import { enterpriseAPI, reportsAPI } from "@services/api";
 
 // Severity badge component
 const SeverityBadge = ({ severity }) => {
   const colors = {
-    critical: "bg-red-100 text-red-800 border-red-200",
-    high: "bg-orange-100 text-orange-800 border-orange-200",
-    medium: "bg-yellow-100 text-yellow-800 border-yellow-200",
-    low: "bg-blue-100 text-blue-800 border-blue-200",
-    info: "bg-gray-100 text-gray-800 border-gray-200",
+    critical: "bg-red-900/30 text-red-400 border-red-700/50",
+    high: "bg-orange-900/30 text-orange-400 border-orange-700/50",
+    medium: "bg-yellow-900/30 text-yellow-400 border-yellow-700/50",
+    low: "bg-cyan-900/30 text-cyan-400 border-cyan-700/50",
+    info: "bg-gray-700/30 text-gray-300 border-gray-700/50",
   };
 
   return (
@@ -55,24 +52,24 @@ const SeverityBadge = ({ severity }) => {
 const ChangeTypeBadge = ({ type }) => {
   const config = {
     fixed: {
-      color: "bg-green-100 text-green-800",
-      icon: CheckCircle,
+      color: "bg-green-900/30 text-green-400",
+      icon: CheckCircleIcon,
       label: "Fixed",
     },
-    new: { color: "bg-red-100 text-red-800", icon: XCircle, label: "New" },
+    new: { color: "bg-red-900/30 text-red-400", icon: XCircleIcon, label: "New" },
     reintroduced: {
-      color: "bg-purple-100 text-purple-800",
-      icon: RefreshCw,
+      color: "bg-purple-900/30 text-purple-400",
+      icon: ArrowPathIcon,
       label: "Reintroduced",
     },
     modified: {
-      color: "bg-yellow-100 text-yellow-800",
-      icon: ArrowUpDown,
+      color: "bg-yellow-900/30 text-yellow-400",
+      icon: ArrowsUpDownIcon,
       label: "Modified",
     },
     unchanged: {
-      color: "bg-gray-100 text-gray-600",
-      icon: Minus,
+      color: "bg-gray-700/30 text-gray-400",
+      icon: MinusIcon,
       label: "Unchanged",
     },
   };
@@ -94,30 +91,26 @@ const FindingRow = ({ finding, changeType, severityChange }) => {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="border-b border-gray-100 last:border-0">
+    <div className="border-b border-gray-700/50 last:border-0">
       <div
-        className="flex items-center justify-between p-3 hover:bg-gray-50 cursor-pointer"
+        className="flex items-center justify-between p-3 hover:bg-gray-800/30 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
           {expanded ? (
-            <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            <ChevronDownIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            <ChevronRightIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
           )}
           <ChangeTypeBadge type={changeType} />
           <SeverityBadge severity={finding.severity} />
-          <span className="font-medium text-gray-900 truncate">
-            {finding.title}
-          </span>
+          <span className="font-medium text-white truncate">{finding.title}</span>
         </div>
-        <div className="flex items-center gap-3 text-sm text-gray-500">
+        <div className="flex items-center gap-3 text-sm text-gray-400">
           <span className="hidden md:inline">{finding.scanner}</span>
-          <span className="hidden lg:inline truncate max-w-[200px]">
-            {finding.file_path}
-          </span>
+          <span className="hidden lg:inline truncate max-w-[200px]">{finding.file_path}</span>
           {severityChange && (
-            <span className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded">
+            <span className="text-xs text-yellow-400 bg-yellow-900/30 px-2 py-0.5 rounded">
               {severityChange.from} → {severityChange.to}
             </span>
           )}
@@ -125,24 +118,20 @@ const FindingRow = ({ finding, changeType, severityChange }) => {
       </div>
 
       {expanded && (
-        <div className="px-10 pb-3 space-y-2 bg-gray-50">
+        <div className="px-10 pb-3 space-y-2 bg-gray-800/30">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-gray-500">Rule ID:</span>
-              <span className="ml-2 font-mono text-gray-700">
-                {finding.rule_id}
-              </span>
+              <span className="text-gray-400">Rule ID:</span>
+              <span className="ml-2 font-mono text-gray-200">{finding.rule_id}</span>
             </div>
             <div>
-              <span className="text-gray-500">Line:</span>
+              <span className="text-gray-400">Line:</span>
               <span className="ml-2">{finding.line}</span>
             </div>
           </div>
           <div className="text-sm">
-            <span className="text-gray-500">File:</span>
-            <span className="ml-2 font-mono text-gray-700">
-              {finding.file_path}
-            </span>
+            <span className="text-gray-400">File:</span>
+            <span className="ml-2 font-mono text-gray-200">{finding.file_path}</span>
           </div>
         </div>
       )}
@@ -153,12 +142,12 @@ const FindingRow = ({ finding, changeType, severityChange }) => {
 // Summary card component
 const SummaryCard = ({ label, value, icon: Icon, color, description }) => {
   const colorClasses = {
-    green: "bg-green-50 text-green-700 border-green-200",
-    red: "bg-red-50 text-red-700 border-red-200",
-    purple: "bg-purple-50 text-purple-700 border-purple-200",
-    yellow: "bg-yellow-50 text-yellow-700 border-yellow-200",
-    gray: "bg-gray-50 text-gray-700 border-gray-200",
-    blue: "bg-blue-50 text-blue-700 border-blue-200",
+    green: "bg-green-900/30 text-green-400 border-green-700/50",
+    red: "bg-red-900/30 text-red-400 border-red-700/50",
+    purple: "bg-violet-900/30 text-violet-400 border-violet-700/50",
+    yellow: "bg-yellow-900/30 text-yellow-400 border-yellow-700/50",
+    gray: "bg-gray-800/30 text-gray-400 border-gray-700/50",
+    blue: "bg-cyan-900/30 text-cyan-400 border-cyan-700/50",
   };
 
   return (
@@ -167,9 +156,7 @@ const SummaryCard = ({ label, value, icon: Icon, color, description }) => {
         <div>
           <p className="text-sm opacity-80">{label}</p>
           <p className="text-2xl font-bold">{value}</p>
-          {description && (
-            <p className="text-xs opacity-60 mt-1">{description}</p>
-          )}
+          {description && <p className="text-xs opacity-60 mt-1">{description}</p>}
         </div>
         <Icon className="w-8 h-8 opacity-50" />
       </div>
@@ -178,11 +165,7 @@ const SummaryCard = ({ label, value, icon: Icon, color, description }) => {
 };
 
 // Main component
-const ScanComparison = ({
-  baseScanId = null,
-  compareScanId = null,
-  projectId = null,
-}) => {
+const ScanComparison = ({ baseScanId = null, compareScanId = null, projectName = null }) => {
   const [selectedBaseScan, setSelectedBaseScan] = useState(baseScanId);
   const [selectedCompareScan, setSelectedCompareScan] = useState(compareScanId);
   const [activeTab, setActiveTab] = useState("all");
@@ -198,67 +181,42 @@ const ScanComparison = ({
     queryKey: ["scan-comparison", selectedBaseScan, selectedCompareScan],
     queryFn: async () => {
       if (!selectedBaseScan || !selectedCompareScan) return null;
-
-      const token = localStorage.getItem("access_token");
-      const response = await fetch(
-        `${API_BASE_URL}/api/enterprise/scans/compare`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-          body: JSON.stringify({
-            base_scan_id: selectedBaseScan,
-            compare_scan_id: selectedCompareScan,
-            include_unchanged: false,
-          }),
-        }
-      );
-      if (!response.ok) throw new Error("Failed to compare scans");
-      return response.json();
+      const response = await enterpriseAPI.compareScans({
+        baseScanId: selectedBaseScan,
+        compareScanId: selectedCompareScan,
+      });
+      return response;
     },
     enabled: !!selectedBaseScan && !!selectedCompareScan,
   });
 
   // Fetch available scans for selection from real API
   const { data: scansData } = useQuery({
-    queryKey: ["available-scans", projectId],
+    queryKey: ["available-scans", projectName],
     queryFn: async () => {
-      const token = localStorage.getItem("access_token");
-      // Fetch real scan history from reports API
-      const response = await fetch(
-        `${API_BASE_URL}/api/reports?project_id=${
-          projectId || ""
-        }&limit=50&sort_by=created_at&sort_order=desc`,
-        {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-        }
-      );
-      if (!response.ok) {
-        throw new Error("Failed to fetch scans");
-      }
-      const data = await response.json();
+      const response = projectName
+        ? await reportsAPI.getProjectReports(projectName, {
+            limit: 50,
+            sort_by: "created_at",
+            sort_order: "desc",
+          })
+        : await reportsAPI.getReports({ limit: 50, sort_by: "created_at", sort_order: "desc" });
       // Transform reports to scan format
-      const scans = (data.reports || []).map((report) => ({
+      const reports = response?.reports || response || [];
+      const scans = (Array.isArray(reports) ? reports : []).map((report) => ({
         id: report.id || report._id,
         timestamp: report.created_at,
         branch: report.branch || report.repository_branch || "main",
         findings:
           report.total_findings ||
-          Object.values(report.findings_by_severity || {}).reduce(
-            (a, b) => a + b,
-            0
-          ) ||
+          Object.values(report.findings_by_severity || {}).reduce((a, b) => a + b, 0) ||
           0,
         status: report.status,
         scan_type: report.scan_type,
       }));
       return { scans };
     },
-    enabled: true, // Always try to fetch
+    enabled: true,
   });
 
   const data = comparisonData?.data || {};
@@ -276,10 +234,7 @@ const ScanComparison = ({
       ];
     }
     if (activeTab === "all" || activeTab === "new") {
-      findings = [
-        ...findings,
-        ...(details.new || []).map((f) => ({ ...f, _changeType: "new" })),
-      ];
+      findings = [...findings, ...(details.new || []).map((f) => ({ ...f, _changeType: "new" }))];
     }
     if (activeTab === "all" || activeTab === "reintroduced") {
       findings = [
@@ -309,131 +264,155 @@ const ScanComparison = ({
 
   const filteredFindings = getFilteredFindings();
 
+  const staggerVariants = {
+    hidden: { opacity: 0, y: 12 },
+    visible: (i) => ({
+      opacity: 1,
+      y: 0,
+      transition: { delay: i * 0.06, duration: 0.3 },
+    }),
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Scan Comparison</h2>
-          <p className="text-gray-500">
-            Compare security scans to track remediation progress
-          </p>
-        </div>
-        <button
-          onClick={() => refetch()}
-          disabled={!selectedBaseScan || !selectedCompareScan}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Compare
-        </button>
-      </div>
-
-      {/* Scan Selector */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center gap-4">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Base Scan (Older)
-            </label>
-            <select
-              value={selectedBaseScan || ""}
-              onChange={(e) => setSelectedBaseScan(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Select base scan...</option>
-              {scansData?.scans?.map((scan) => (
-                <option key={scan.id} value={scan.id}>
-                  {new Date(scan.timestamp).toLocaleDateString()} -{" "}
-                  {scan.branch} ({scan.findings} findings)
-                </option>
-              ))}
-            </select>
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      className="space-y-6"
+      variants={{ visible: { transition: { staggerChildren: 0.05 } } }}
+    >
+      <motion.div custom={0} variants={staggerVariants}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-white">Scan Comparison</h2>
+            <p className="text-gray-400">Compare security scans to track remediation progress</p>
           </div>
+          <button
+            onClick={() => refetch()}
+            disabled={!selectedBaseScan || !selectedCompareScan}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-cyan-400 via-violet-500 to-cyan-400 text-white font-semibold hover:from-cyan-300 hover:via-violet-400 hover:to-cyan-300 shadow-lg hover:shadow-xl hover:shadow-cyan-500/20 transition-all duration-200 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+          >
+            <ArrowPathIcon className="w-4 h-4" />
+            Compare
+          </button>
+        </div>
+      </motion.div>
 
-          <ArrowRight className="w-6 h-6 text-gray-400 flex-shrink-0 mt-6" />
+      <motion.div custom={1} variants={staggerVariants}>
+        <Card padding="lg">
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
+                Base Scan (Older)
+              </label>
+              <select
+                value={selectedBaseScan || ""}
+                onChange={(e) => setSelectedBaseScan(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-700/50 rounded-lg focus:ring-2 focus:ring-cyan-500 bg-gray-800 text-white"
+              >
+                <option value="">Select base scan...</option>
+                {scansData?.scans?.map((scan) => (
+                  <option key={scan.id} value={scan.id}>
+                    {new Date(scan.timestamp).toLocaleDateString()} - {scan.branch} ({scan.findings}{" "}
+                    findings)
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Compare Scan (Newer)
-            </label>
-            <select
-              value={selectedCompareScan || ""}
-              onChange={(e) => setSelectedCompareScan(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Select compare scan...</option>
-              {scansData?.scans?.map((scan) => (
-                <option key={scan.id} value={scan.id}>
-                  {new Date(scan.timestamp).toLocaleDateString()} -{" "}
-                  {scan.branch} ({scan.findings} findings)
-                </option>
-              ))}
-            </select>
+            <ArrowRightIcon className="w-6 h-6 text-gray-400 flex-shrink-0 mt-6" />
+
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-200 mb-2">
+                Compare Scan (Newer)
+              </label>
+              <select
+                value={selectedCompareScan || ""}
+                onChange={(e) => setSelectedCompareScan(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-700/50 rounded-lg focus:ring-2 focus:ring-cyan-500 bg-gray-800 text-white"
+              >
+                <option value="">Select compare scan...</option>
+                {scansData?.scans?.map((scan) => (
+                  <option key={scan.id} value={scan.id}>
+                    {new Date(scan.timestamp).toLocaleDateString()} - {scan.branch} ({scan.findings}{" "}
+                    findings)
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
-      </div>
+        </Card>
+      </motion.div>
 
-      {isLoading && (
-        <div className="flex items-center justify-center h-64">
-          <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-        </div>
-      )}
+      <AnimatePresence mode="wait">
+        {isLoading && (
+          <motion.div
+            key="loading"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex items-center justify-center h-64"
+          >
+            <ArrowPathIcon className="w-8 h-8 text-cyan-500 animate-spin" />
+          </motion.div>
+        )}
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-          <AlertTriangle className="w-5 h-5 inline mr-2" />
-          Error comparing scans: {error.message}
-        </div>
-      )}
+        {error && (
+          <motion.div
+            key="error"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="bg-red-900/30 border border-red-700/50 rounded-lg p-4 text-red-400"
+          >
+            <ExclamationTriangleIcon className="w-5 h-5 inline mr-2" />
+            Error comparing scans: {error.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {data.summary && (
-        <>
+        <motion.div custom={2} variants={staggerVariants}>
           {/* Summary Cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <SummaryCard
               label="Fixed"
               value={summary.fixed || 0}
-              icon={CheckCircle}
+              icon={CheckCircleIcon}
               color="green"
               description="Vulnerabilities remediated"
             />
             <SummaryCard
               label="New"
               value={summary.new || 0}
-              icon={XCircle}
+              icon={XCircleIcon}
               color="red"
               description="Newly introduced"
             />
             <SummaryCard
               label="Reintroduced"
               value={summary.reintroduced || 0}
-              icon={RefreshCw}
+              icon={ArrowPathIcon}
               color="purple"
               description="Previously fixed, now back"
             />
             <SummaryCard
               label="Modified"
               value={summary.modified || 0}
-              icon={ArrowUpDown}
+              icon={ArrowsUpDownIcon}
               color="yellow"
               description="Severity changed"
             />
             <SummaryCard
               label="Net Change"
-              value={
-                summary.net_change > 0
-                  ? `+${summary.net_change}`
-                  : summary.net_change
-              }
-              icon={summary.net_change <= 0 ? TrendingDown : TrendingUp}
+              value={summary.net_change > 0 ? `+${summary.net_change}` : summary.net_change}
+              icon={summary.net_change <= 0 ? ArrowTrendingDownIcon : ArrowTrendingUpIcon}
               color={summary.net_change <= 0 ? "green" : "red"}
               description="New - Fixed"
             />
             <SummaryCard
               label="Improvement"
               value={summary.improvement_score?.toFixed(1) || 0}
-              icon={summary.improvement_score >= 0 ? TrendingUp : TrendingDown}
+              icon={summary.improvement_score >= 0 ? ArrowTrendingUpIcon : ArrowTrendingDownIcon}
               color={summary.improvement_score >= 0 ? "blue" : "red"}
               description="Weighted score"
             />
@@ -441,14 +420,14 @@ const ScanComparison = ({
 
           {/* Scan Info */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-              <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
-                <FileText className="w-4 h-4" />
+            <Card>
+              <h4 className="font-medium text-gray-200 mb-3 flex items-center gap-2">
+                <DocumentTextIcon className="w-4 h-4" />
                 Base Scan
               </h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Date:</span>
+                  <span className="text-gray-400">Date:</span>
                   <span>
                     {data.base_scan?.timestamp
                       ? new Date(data.base_scan.timestamp).toLocaleString()
@@ -456,29 +435,27 @@ const ScanComparison = ({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Branch:</span>
+                  <span className="text-gray-400">Branch:</span>
                   <span className="flex items-center gap-1">
-                    <GitBranch className="w-3 h-3" />
+                    <ArrowsRightLeftIcon className="w-3 h-3" />
                     {data.base_scan?.branch || "N/A"}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Findings:</span>
-                  <span className="font-medium">
-                    {data.base_scan?.total_findings || 0}
-                  </span>
+                  <span className="text-gray-400">Findings:</span>
+                  <span className="font-medium">{data.base_scan?.total_findings || 0}</span>
                 </div>
               </div>
-            </div>
+            </Card>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-              <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
-                <FileText className="w-4 h-4" />
+            <Card>
+              <h4 className="font-medium text-gray-200 mb-3 flex items-center gap-2">
+                <DocumentTextIcon className="w-4 h-4" />
                 Compare Scan
               </h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Date:</span>
+                  <span className="text-gray-400">Date:</span>
                   <span>
                     {data.compare_scan?.timestamp
                       ? new Date(data.compare_scan.timestamp).toLocaleString()
@@ -486,35 +463,29 @@ const ScanComparison = ({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Branch:</span>
+                  <span className="text-gray-400">Branch:</span>
                   <span className="flex items-center gap-1">
-                    <GitBranch className="w-3 h-3" />
+                    <ArrowsRightLeftIcon className="w-3 h-3" />
                     {data.compare_scan?.branch || "N/A"}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Findings:</span>
-                  <span className="font-medium">
-                    {data.compare_scan?.total_findings || 0}
-                  </span>
+                  <span className="text-gray-400">Findings:</span>
+                  <span className="font-medium">{data.compare_scan?.total_findings || 0}</span>
                 </div>
               </div>
-            </div>
+            </Card>
           </div>
 
           {/* Analysis Insights */}
           {data.analysis && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <h4 className="font-medium text-blue-800 mb-2">
-                {data.analysis.summary}
-              </h4>
+            <div className="bg-cyan-900/30 border border-cyan-700/50 rounded-xl p-4">
+              <h4 className="font-medium text-cyan-300 mb-2">{data.analysis.summary}</h4>
 
               {data.analysis.highlights?.length > 0 && (
                 <div className="mb-3">
-                  <p className="text-sm text-blue-700 font-medium mb-1">
-                    Highlights:
-                  </p>
-                  <ul className="text-sm text-blue-700 space-y-1">
+                  <p className="text-sm text-cyan-300 font-medium mb-1">Highlights:</p>
+                  <ul className="text-sm text-cyan-300 space-y-1">
                     {data.analysis.highlights.map((h, i) => (
                       <li key={i}>{h}</li>
                     ))}
@@ -524,13 +495,11 @@ const ScanComparison = ({
 
               {data.analysis.recommendations?.length > 0 && (
                 <div>
-                  <p className="text-sm text-blue-700 font-medium mb-1">
-                    Recommendations:
-                  </p>
-                  <ul className="text-sm text-blue-700 space-y-1">
+                  <p className="text-sm text-cyan-300 font-medium mb-1">Recommendations:</p>
+                  <ul className="text-sm text-cyan-300 space-y-1">
                     {data.analysis.recommendations.map((r, i) => (
                       <li key={i} className="flex items-start gap-2">
-                        <ArrowRight className="w-3 h-3 mt-1 flex-shrink-0" />
+                        <ArrowRightIcon className="w-3 h-3 mt-1 flex-shrink-0" />
                         {r}
                       </li>
                     ))}
@@ -541,17 +510,14 @@ const ScanComparison = ({
           )}
 
           {/* Findings List */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl">
             {/* Tabs */}
-            <div className="flex items-center gap-2 p-4 border-b border-gray-100 overflow-x-auto">
+            <div className="flex items-center gap-2 p-4 border-b border-gray-700/50 overflow-x-auto">
               {[
                 {
                   key: "all",
                   label: "All Changes",
-                  count:
-                    (summary.fixed || 0) +
-                    (summary.new || 0) +
-                    (summary.reintroduced || 0),
+                  count: (summary.fixed || 0) + (summary.new || 0) + (summary.reintroduced || 0),
                 },
                 { key: "fixed", label: "Fixed", count: summary.fixed || 0 },
                 { key: "new", label: "New", count: summary.new || 0 },
@@ -569,25 +535,25 @@ const ScanComparison = ({
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap ${
+                  className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 ${
                     activeTab === tab.key
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-600 hover:bg-gray-100"
+                      ? "bg-cyan-900/30 text-cyan-400"
+                      : "text-gray-400 hover:bg-gray-800/30"
                   }`}
                 >
                   {tab.label}
-                  <span className="ml-2 px-2 py-0.5 text-xs bg-white rounded-full">
+                  <span className="ml-2 px-2 py-0.5 text-xs bg-gray-700/50 rounded-full">
                     {tab.count}
                   </span>
                 </button>
               ))}
 
               <div className="ml-auto flex items-center gap-2">
-                <Filter className="w-4 h-4 text-gray-400" />
+                <FunnelIcon className="w-4 h-4 text-gray-400" />
                 <select
                   value={severityFilter}
                   onChange={(e) => setSeverityFilter(e.target.value)}
-                  className="text-sm border border-gray-200 rounded-lg px-2 py-1"
+                  className="text-sm border border-gray-700/50 rounded-lg px-2 py-1 bg-gray-800 text-white"
                 >
                   <option value="all">All Severities</option>
                   <option value="critical">Critical</option>
@@ -601,7 +567,7 @@ const ScanComparison = ({
             {/* Findings */}
             <div className="max-h-[500px] overflow-y-auto">
               {filteredFindings.length === 0 ? (
-                <div className="text-center text-gray-500 py-12">
+                <div className="text-center text-gray-400 py-12">
                   No findings match the current filters
                 </div>
               ) : (
@@ -619,21 +585,27 @@ const ScanComparison = ({
 
           {/* Export Button */}
           <div className="flex justify-end">
-            <button className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50">
-              <Download className="w-4 h-4" />
+            <button className="flex items-center gap-2 px-4 py-2 border border-gray-700/50 rounded-lg hover:bg-gray-800/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900">
+              <ArrowDownTrayIcon className="w-4 h-4" />
               Export Comparison Report
             </button>
           </div>
-        </>
+        </motion.div>
       )}
 
       {!data.summary && !isLoading && !error && (
-        <div className="text-center py-12 bg-gray-50 rounded-xl">
-          <ArrowUpDown className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500">Select two scans to compare</p>
-        </div>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          custom={3}
+          variants={staggerVariants}
+          className="text-center py-12 bg-gray-800/30 rounded-xl"
+        >
+          <ArrowsUpDownIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+          <p className="text-gray-400">Select two scans to compare</p>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 };
 

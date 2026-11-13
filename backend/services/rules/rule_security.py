@@ -2,18 +2,17 @@
 Security boundaries and validation for custom rules
 This module provides comprehensive security controls for user-defined rules
 """
+import json
 import re
-import time
-import threading
 import subprocess
 import tempfile
-import hashlib
-from pathlib import Path
-from typing import Dict, List, Set, Optional, Any, Tuple
+import time
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
 import yaml
-import json
-from pydantic import BaseModel, Field, validator
+
 
 class AllowedLanguage(str, Enum):
     """Supported languages for custom rules"""
@@ -501,8 +500,7 @@ class RuleTestingFramework:
                         break
         
         except Exception as e:
-            # Log error but don't fail the test
-            pass
+            logger.warning("Regex rule pattern execution failed: %s", e, exc_info=True)
         
         return matches
     
@@ -535,15 +533,12 @@ class RuleTestingFramework:
                     matches = output.get('results', [])
             
             except subprocess.TimeoutExpired:
-                # Rule took too long to execute
-                pass
+                logger.warning("Semgrep rule execution timed out for rule: %s on %s", rule_data.get('id', 'unknown'), file_path)
             except json.JSONDecodeError:
-                # Invalid JSON output
-                pass
+                logger.warning("Semgrep returned invalid JSON for rule: %s on %s", rule_data.get('id', 'unknown'), file_path)
             
         except Exception as e:
-            # Log error but don't fail the test
-            pass
+            logger.warning("Semgrep rule execution failed: %s", e, exc_info=True)
         
         finally:
             # Cleanup temporary rule file

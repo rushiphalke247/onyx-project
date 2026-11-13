@@ -2,6 +2,7 @@
  * Footer Component - Enterprise Grade
  * Professional footer for ONYX Security Platform
  */
+import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import {
   DocumentTextIcon,
@@ -22,7 +23,12 @@ export default function Footer() {
   ];
 
   return (
-    <footer className="relative">
+    <motion.footer
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      className="relative"
+    >
       {/* Glass background */}
       <div className="absolute inset-0 bg-gray-900/80 backdrop-blur-xl border-t border-gray-800/50" />
 
@@ -39,15 +45,11 @@ export default function Footer() {
                 <OnyxLogo variant="mini" className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-sm font-bold text-white tracking-wide">
-                  ONYX
-                </span>
+                <span className="text-sm font-bold text-white tracking-wide">ONYX</span>
               </div>
             </div>
             <div className="hidden sm:block w-px h-4 bg-gray-700" />
-            <span className="text-xs text-gray-500">
-              © {currentYear} All rights reserved
-            </span>
+            <span className="text-xs text-gray-500">© {currentYear} All rights reserved</span>
           </div>
 
           {/* Center - Links */}
@@ -56,10 +58,11 @@ export default function Footer() {
               <Link
                 key={link.name}
                 to={link.href}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 
-                         hover:text-white hover:bg-gray-800/50 rounded-lg transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400
+                         hover:text-white hover:bg-gray-800/50 rounded-lg transition-all
+                         focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
               >
-                <link.icon className="w-3.5 h-3.5" />
+                <link.icon className="w-3.5 h-3.5" aria-hidden="true" />
                 <span className="hidden md:inline">{link.name}</span>
               </Link>
             ))}
@@ -71,14 +74,12 @@ export default function Footer() {
               className="flex items-center gap-2 px-2.5 py-1 rounded-md 
                         bg-gray-800/50 border border-gray-700/50"
             >
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                Version
-              </span>
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">Version</span>
               <span className="text-xs text-gray-300 font-mono">1.0.0</span>
             </div>
           </div>
         </div>
       </div>
-    </footer>
+    </motion.footer>
   );
 }

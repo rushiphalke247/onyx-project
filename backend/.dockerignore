@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.git/
+.env
+.env.*
+!.env.example
+.env.local
+.gitkeep
+**/*.db
+node_modules/
+tests/
+*.md
+*.log
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage*
+wheels/
+vendor/
+data/threats/
+data/policies/
+
+# ML model artifacts (generated at runtime)
+ml_models/
+*.pkl

@@ -1,731 +1,262 @@
-# 🎓 User Guide
+# ONYX User Guide
 
-## Welcome to ONYX Security Intelligence Platform
-
-ONYX is an enterprise-grade security analysis tool that combines multiple security scanners with artificial intelligence to provide comprehensive vulnerability assessments, intelligent risk prioritization, and actionable remediation guidance.
-
-This guide will help you get started with the platform, understand its features, and make the most of its capabilities.
+ONYX combines multi-tool security scanning, AI-assisted analysis, and compliance
+reporting in one self-hosted platform.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
-### First Login
+### Sign in
 
-1. **Access the Platform**
+Open the ONYX URL for your deployment and sign in with your email/username and
+password. Accounts with 2FA enabled must provide the current authenticator code.
+Google SSO may be available depending on deployment configuration.
 
-   - Open your web browser and navigate to your ONYX Platform URL
-   - Default development URL: `http://localhost:3000`
+### Dashboard
 
-2. **Initial Setup**
+The dashboard summarizes:
 
-   - If this is your first time accessing the platform, you'll need to create an admin account
-   - Contact your system administrator for login credentials
+- security score and severity distribution
+- recent scans and findings
+- project activity
+- scanner availability
+- trend indicators
 
-3. **Dashboard Overview**
-   - Upon login, you'll see the main dashboard with:
-     - Recent scan results
-     - Security metrics overview
-     - Active scans status
-     - Quick action buttons
+### Main navigation
 
----
+| Page | Purpose |
+|---|---|
+| Dashboard | Security overview and quick actions |
+| Projects | Repositories, teams, and scan configuration |
+| Reports | Completed scan reports and downloads |
+| Compliance | Framework coverage, controls, risk, and trends |
+| Analytics | Cross-project security metrics |
+| Scheduled Scans | Recurring scan configuration and history |
+| Secret History | Secrets detected across scans |
+| Settings | Profile, notifications, sessions, and API tokens |
+| Admin | Users, projects, reports, audit logs, retention, ML, webhook configuration |
 
-## 📊 Understanding the Dashboard
-
-### Main Dashboard Components
-
-**1. Security Overview Card**
-
-- Total vulnerabilities found across all projects
-- Severity breakdown (Critical, High, Medium, Low)
-- Trend indicators showing improvement or degradation
-
-**2. Recent Scans Section**
-
-- List of recent security scans
-- Scan status (Completed, Running, Failed)
-- Quick access to detailed reports
-
-**3. Project Statistics**
-
-- Number of projects monitored
-- Average vulnerabilities per project
-- Most critical projects requiring attention
-
-**4. Scanner Status**
-
-- Real-time status of all security scanners
-- Last update times for scanner databases
-- Health indicators for each tool
-
-### Navigation Menu
-
-**Projects** - View and manage all monitored projects
-**Reports** - Access detailed scan reports and analytics
-**Scans** - Monitor active scans and scan history
-**Settings** - Configure platform settings and integrations
-**Help** - Access documentation and support resources
+Some pages are role-restricted. Admin-only pages are hidden or rejected when the
+account lacks permission.
 
 ---
 
-## 🔍 Running Security Scans
+## Running Scans
 
-### Manual Scan Submission
+### Manual scan
 
-1. **Navigate to Scan Submission**
+1. Open a project or use the scan action on the dashboard.
+2. Enter or confirm the repository URL and branch.
+3. Select the scan types.
+4. Start the scan.
+5. Watch progress in real time. Results appear in the report when complete.
 
-   - Click "New Scan" button on the dashboard
-   - Or go to **Scans** → **Submit New Scan**
+Repository URLs must not contain embedded credentials. Use the configured SCM
+access token instead. A scan can be stopped while it is running.
 
-2. **Configure Scan Parameters**
+### Webhook-triggered scans
 
-   ```
-   Repository URL: https://github.com/yourusername/your-repo.git
-   Branch: main (or specify branch)
-   Scan Types: Select desired security scans
-   ```
+Configure the repository provider to send push or merge-request events to:
 
-3. **Available Scan Types**
-
-   - **SAST (Static Analysis)**: Source code vulnerability scanning
-   - **Secrets Detection**: Find exposed API keys and credentials
-   - **Container Security**: Docker image vulnerability scanning
-   - **Infrastructure**: Infrastructure-as-Code security analysis
-   - **Dependency Check**: Third-party package vulnerability scanning
-
-4. **Start the Scan**
-   - Review your configuration
-   - Click "Start Scan"
-   - You'll receive a unique scan ID for tracking
-
-### Automated Scans via Git Webhooks
-
-**Set up automatic scanning when code is pushed:**
-
-1. **Configure Webhook in Your Git Repository**
-
-   **For GitHub:**
-
-   - Go to repository **Settings** → **Webhooks**
-   - Click "Add webhook"
-   - Payload URL: `https://your-platform-url/webhook/`
-   - Content type: `application/json`
-   - Secret: Configure in platform settings
-   - Events: Select "Push" events
-
-   **For GitLab:**
-
-   - Go to project **Settings** → **Webhooks**
-   - URL: `https://your-platform-url/webhook/`
-   - Secret Token: Configure in platform settings
-   - Trigger: Push events
-
-2. **Webhook Configuration in Platform**
-   - Navigate to **Settings** → **Integrations**
-   - Configure webhook secret keys
-   - Enable automatic scanning
-   - Set branch filters (e.g., only scan main/master branches)
-
-### Monitoring Scan Progress
-
-**Real-time Scan Monitoring:**
-
-- Scans are displayed in real-time on the dashboard
-- Progress indicators show completion percentage
-- Estimated completion times are provided
-- WebSocket updates provide live status updates
-
-**Scan Statuses:**
-
-- 🟡 **Pending**: Scan queued for processing
-- 🔵 **Running**: Scan actively executing
-- 🟢 **Completed**: Scan finished successfully
-- 🔴 **Failed**: Scan encountered errors
-- ⚫ **Cancelled**: Scan was manually stopped
-
----
-
-## 📋 Understanding Scan Reports
-
-### Unified Security Report Interface
-
-Each scan report provides a comprehensive, unified view with **6 interactive tabs**:
-
-#### **Tab 1: Overview**
-
-The overview tab gives you an at-a-glance summary:
-
-- **Security Score** (0-100) - AI-calculated overall security rating
-- **Risk Score** (0-100) - Aggregated risk assessment
-- **Severity Breakdown** - Critical, High, Medium, Low, Info counts
-- **Key Metrics** - Total findings, scanner results, scan duration
-- **Risk Trends** - Visual indicators of security posture
-
-#### **Tab 2: Security Findings**
-
-Detailed vulnerability listing with:
-
-- **Filterable List** - Filter by severity, scanner, file
-- **Vulnerability Details** - Title, severity, file location, line numbers
-- **Code Context** - Vulnerable code snippets with highlighting
-- **CWE/CVE References** - Links to vulnerability databases
-- **Quick Actions** - Copy code, expand details
-
-#### **Tab 3: AI Analysis**
-
-GPT-4 or Gemini-powered intelligent analysis:
-
-- **Executive Summary** - Natural language security assessment
-- **Risk Assessment** - AI-calculated risk score with breakdown
-- **Threat Categories** - Categorized security threats identified
-- **Attack Vectors** - Potential exploitation paths
-- **Priority Findings** - Top vulnerabilities requiring attention
-- **Compliance Impact** - Effects on regulatory compliance
-
-#### **Tab 4: Compliance Mapping**
-
-Interactive compliance framework analysis:
-
-- **Standard Toggles** - Select OWASP, NIST, ISO27001, PCI-DSS
-- **Compliance Rate** - Percentage compliance for each framework
-- **Category Breakdown** - Status of each compliance category
-- **Finding Mapping** - See which vulnerabilities affect each control
-- **Risk Indicators** - Visual severity indicators per category
-- **Recommendations** - Priority-based compliance improvement tips
-
-**Supported Compliance Frameworks:**
-
-- **OWASP Top 10 (2021)** - A01-A10 categories
-- **NIST Cybersecurity Framework (1.1)** - Identify, Protect, Detect, Respond, Recover
-- **ISO 27001:2013** - A.8-A.18 controls
-- **PCI DSS** - Requirements 1-12
-
-#### **Tab 5: Remediation Roadmap**
-
-Prioritized action plan with timeline:
-
-- **Immediate (0-48 hours)** - Critical and high severity issues
-- **Short-term (1-2 weeks)** - Medium severity issues
-- **Long-term (1+ month)** - Low severity and improvements
-- **AI Remediation Plan** - When available, AI-generated specific actions
-- **Quick Wins** - Easy security improvements to implement
-- **Best Practices** - Security recommendations
-
-#### **Tab 6: Scanner Results**
-
-Individual scanner performance:
-
-- **Scanner Status** - Success/failure for each tool
-- **Findings Count** - Vulnerabilities found per scanner
-- **Duration** - Execution time for each scan
-- **Error Details** - Any issues during scanning
-
-### Reading Vulnerability Details
-
-**Vulnerability Information Includes:**
-
-```
-Title: SQL Injection in User Authentication
-Severity: HIGH
-File: src/auth/login.py
-Line: 42
-CWE ID: CWE-89
-OWASP Category: A03:2021 – Injection
-Confidence: High
+```text
+https://your-domain.example/api/webhook/
 ```
 
-**Code Context:**
+Set a `WEBHOOK_SECRET` in the backend and configure the same secret in the SCM
+webhook. ONYX accepts the shared-secret header or a GitHub-style HMAC-SHA256
+signature. If no secret is configured, ingestion fails closed with HTTP 503.
 
-- Vulnerable code snippets
-- Line numbers and file locations
-- Surrounding code context for better understanding
+See [Webhook Setup](webhook-github-actions.md) for a GitHub Actions example.
+Manual scan API calls use `POST /api/webhook/scan` with a user access token.
 
-### AI-Powered Analysis
+### Scheduled scans
 
-**Executive Summary:**
+Open **Scheduled Scans**:
 
-- Natural language summary of security posture
-- Key security concerns highlighted
-- Overall risk assessment
-- Security and risk scores (0-100)
+1. Create a schedule.
+2. Choose a project, branch, scan types, cron expression, and timezone.
+3. Enable the schedule.
+4. Use run-now to test it and history to inspect previous executions.
 
-**Threat Intelligence:**
-
-- **Threat Categories** - Injection attacks, authentication issues, data exposure, etc.
-- **Attack Vectors** - How vulnerabilities could be exploited
-- **Affected Components** - Files and functions at risk
-
-**Priority Findings:**
-
-- Most critical vulnerabilities requiring immediate attention
-- Risk-based prioritization
-- Business impact assessment
-
-**Remediation Recommendations:**
-
-- Specific fix suggestions for each vulnerability
-- Secure coding examples
-- Best practice recommendations
-- Prioritized roadmap with timeline
-
-**Compliance Impact:**
-
-- Effects on OWASP, NIST, ISO27001, PCI-DSS compliance
-- Control mapping per framework
-- Audit preparation guidance
+Schedules are stored in MongoDB and run through the backend scheduler. The
+current scheduler is process-local, so run one backend worker unless the
+deployment has shared scheduling.
 
 ---
 
-## 🔧 Platform Features
+## Reports and Findings
 
-### Project Management
+A scan report includes:
 
-**Adding New Projects:**
+| Section | Content |
+|---|---|
+| Overview | Security score, severity counts, scan metadata |
+| Findings | Filterable vulnerabilities with file/line and code context |
+| AI Analysis | Explanation, impact, and remediation guidance |
+| Compliance | Framework/control mappings and coverage |
+| Chat | Scan-aware Q&A with citations |
+| Compare | Changes between scans or branches |
 
-1. Navigate to **Projects** → **Add Project**
-2. Enter project details:
-   - Project name
-   - Repository URL
-   - Primary branch
-   - Scan frequency
-   - Notification preferences
+Reports can be exported as PDF. SBOM exports are available in SPDX and
+CycloneDX formats from the enterprise security views.
 
-**Project Settings:**
+### Finding workflow
 
-- Configure automatic scan triggers
-- Set notification preferences
-- Define custom scan parameters
-- Manage access permissions
+- Review severity, confidence, and code context.
+- Add labels or suppressions when appropriate.
+- Mark false positives with supporting context.
+- Use triage scoring to prioritize business impact.
+- Generate a fix preview when AI-assisted remediation is enabled.
+- Approve an auto-fix before any branch or pull request is created.
 
-### Report Management
+Auto-fix is not autonomous. Review generated code and the resulting PR/MR before
+merging.
 
-**Viewing Reports:**
+### Secret history
 
-- **All Reports**: Comprehensive list of all scan reports
-- **Filter Options**: Filter by project, date, severity, status
-- **Search**: Search reports by project name or vulnerability type
-- **Sorting**: Sort by date, severity, or project name
+Secret History tracks detected secrets across scans:
 
-**Exporting Reports:**
+- filter by project, status, and time
+- view active, resolved, and dismissed secrets
+- mark items resolved or dismissed
+- review discovery/resolution trends
 
-- **PDF Export**: Professional reports for stakeholders
-- **JSON Export**: Machine-readable format for integration
-- **CSV Export**: Spreadsheet-compatible format for analysis
-
-**Report Sharing:**
-
-- Generate shareable links for specific reports
-- Configure access permissions
-- Set expiration dates for shared links
-
-### Advanced Analytics
-
-**Security Trends:**
-
-- Vulnerability trends over time
-- Project security score evolution
-- Scanner effectiveness metrics
-
-**Comparative Analysis:**
-
-- Compare security posture across projects
-- Benchmark against industry standards
-- Track improvement over time
-
-**Custom Dashboards:**
-
-- Create custom views for different stakeholders
-- Configure KPI displays
-- Set up automated reports
+Rotate any exposed credential even after the finding is marked resolved.
 
 ---
 
-## 🔔 Notifications & Integrations
+## AI Assistant and Triage
 
-### Slack Integration
+### AI Chat
 
-**Setup Slack Notifications:**
+Ask scan-aware questions such as:
 
-1. Navigate to **Settings** → **Notifications**
-2. Click "Configure Slack"
-3. Add your Slack webhook URL
-4. Configure notification triggers:
-   - High/Critical vulnerabilities found
-   - Scan completion
-   - Scan failures
+- "What is the highest-risk issue in this scan?"
+- "How do I fix the SQL injection in login.py?"
+- "Which findings affect PCI-DSS access-control controls?"
+- "Show the evidence for this finding."
 
-**Notification Examples:**
+Answers may include citations from the local knowledge corpus. AI output can be
+wrong or incomplete; verify it against the code and the finding evidence.
 
-```
-🚨 Critical vulnerability found in project-name
-📊 Security scan completed for project-name: 5 issues found
-✅ All vulnerabilities resolved in project-name
+### Intelligent Triage
+
+Triage combines severity, exploitability, CVSS, business context, trend, and age
+into a priority score. Add business context to improve prioritization. The score
+is decision support, not a replacement for security judgment.
+
+### AI provider behavior
+
+When `AI_PROVIDER=auto`, ONYX tries configured providers in the order:
+
+```text
+Gemini -> Groq -> OpenRouter -> Ollama
 ```
 
-### Microsoft Teams Integration
-
-**Setup Teams Notifications:**
-
-1. Create an incoming webhook in your Teams channel
-2. Add webhook URL in **Settings** → **Notifications**
-3. Configure notification preferences
-4. Test the integration
-
-### Email Notifications
-
-**Configure Email Alerts:**
-
-- SMTP server configuration
-- Email templates customization
-- Recipient management
-- Notification scheduling
+Unconfigured providers are skipped. OpenAI remains available when explicitly
+configured or included in the chain. If all providers fail, AI features may be
+unavailable while scanning and reporting continue.
 
 ---
 
-## ⚙️ Platform Configuration
+## Scanners
 
-### Scanner Configuration
+### Core integrations
 
-**Semgrep (SAST)**
+Semgrep, Bandit, Safety, GitLeaks, Detect-Secrets, SOPS, and Dependency
+Governance.
 
-- Rule sets: Enable/disable specific rule categories
-- Custom rules: Add organization-specific rules
-- Exclusions: Configure files/paths to exclude
+### Optional integrations
 
-**Trivy (Container Security)**
+Trivy, OWASP ZAP, Nuclei, CodeQL, Checkov, and Lynis. These require their
+binaries or services to be installed and may require environment flags:
 
-- Severity filtering
-- Database update frequency
-- Registry authentication
+```env
+ENABLE_TRIVY=true
+ENABLE_ZAP=true
+ENABLE_NUCLEI=true
+ENABLE_CODEQL=true
+ENABLE_CHECKOV=true
+ENABLE_LYNIS=true
+```
 
-**GitLeaks (Secrets Detection)**
-
-- Custom patterns for organization-specific secrets
-- Whitelist management
-- False positive handling
-
-### AI Analysis Settings
-
-**OpenAI Configuration:**
-
-- API key management
-- Model selection (GPT-4, GPT-3.5)
-- Token limits and cost management
-- Custom prompts for analysis
-
-**Analysis Depth:**
-
-- Executive summary generation
-- Detailed technical analysis
-- Compliance mapping
-- Remediation guidance level
-
-### User Management
-
-**User Roles:**
-
-- **Admin**: Full platform access and configuration
-- **Security Manager**: View all reports, configure scans
-- **Developer**: View reports for assigned projects
-- **Viewer**: Read-only access to reports
-
-**Access Control:**
-
-- Project-based permissions
-- Role-based access control (RBAC)
-- API token management
-- Audit trail logging
+Missing optional tools produce a degraded scan, not a failed application.
+Scanner health is available from the dashboard or
+`GET /api/scanners/health`. That endpoint checks Semgrep, Trivy, GitLeaks,
+Bandit, and Safety; other integrations may still be available.
 
 ---
 
-## 🛡️ Admin Dashboard (Administrators Only)
+## Compliance
 
-The Admin Dashboard provides comprehensive system oversight and management capabilities exclusively for administrators.
+ONYX maps findings to compliance frameworks and identifiers, including commonly
+used standards and custom framework IDs. Views include:
 
-### Accessing Admin Dashboard
+- framework coverage and control status
+- risk summaries and trends
+- project assessments
+- compliance reports
 
-1. Log in with an Admin account
-2. Click "Admin Panel" in the sidebar navigation (visible only to admins)
-3. Or navigate directly to `/admin`
-
-### Dashboard Overview
-
-The Admin Dashboard provides real-time system statistics:
-
-**User Statistics:**
-
-- Total users across all roles
-- Users by role breakdown (Admin, Security Manager, Developer, Viewer)
-- Users by status (Active, Pending, Suspended)
-- Recent registrations
-
-**Project Statistics:**
-
-- Total projects across all users
-- Projects by status
-- Most active projects
-
-**Scan Statistics:**
-
-- Total scans performed
-- Scans by status (Completed, Running, Failed)
-- Total findings discovered
-- Critical vulnerabilities count
-
-### User Management (Admin)
-
-Administrators can manage all users from the Admin Dashboard:
-
-**View All Users:**
-
-- See all registered users with their details
-- Filter by role, status, or search by name/email
-- View each user's project count and scan history
-
-**User Actions:**
-
-- **Change Role**: Promote/demote users between roles
-- **Change Status**: Activate, suspend, or set users to pending
-- **View Activity**: See detailed activity history for any user
-- **Delete User**: Remove users (with safeguards for last admin)
-
-### Project Oversight
-
-View and manage all projects across the platform:
-
-- See all projects with their owners
-- View scan history and findings per project
-- Delete projects if necessary
-- Monitor project health and activity
-
-### Activity Monitoring
-
-Real-time activity feed showing:
-
-- User registrations
-- User logins
-- Project creations
-- Scan completions and failures
-- System events
-
-### Admin-Protected Routes
-
-The following routes are protected for admin-only access:
-
-- `/admin` - Admin Dashboard
-- `/users` - User Management
-- `/audit-logs` - Audit Logs
-- `/retention-policies` - Data Retention Policies
-
-Non-admin users attempting to access these routes will see an "Access Denied" message.
+Compliance features help organize evidence and remediation work. They do not
+constitute certification or legal advice.
 
 ---
 
-## 🛠️ Troubleshooting
+## Notifications
 
-### Common Issues
+Configure supported integrations in Settings or deployment configuration:
 
-**1. Scan Failures**
+- in-app WebSocket notifications
+- Slack
+- Microsoft Teams
+- SMTP email
 
-_Symptoms:_ Scans fail with error messages
-_Causes:_
-
-- Repository access issues
-- Scanner tool problems
-- Resource limitations
-
-_Solutions:_
-
-- Verify repository URL and access permissions
-- Check scanner status in **Settings** → **System Health**
-- Contact administrator if resource issues persist
-
-**2. Missing Vulnerabilities**
-
-_Symptoms:_ Expected vulnerabilities not detected
-_Causes:_
-
-- Scanner configuration issues
-- File exclusions
-- Rule set limitations
-
-_Solutions:_
-
-- Review scanner configurations
-- Check file exclusion patterns
-- Update scanner rule sets
-
-**3. Slow Scan Performance**
-
-_Symptoms:_ Scans take longer than expected
-_Causes:_
-
-- Large repositories
-- Resource limitations
-- Network issues
-
-_Solutions:_
-
-- Consider excluding non-essential files
-- Contact administrator about resource allocation
-- Break large repositories into smaller components
-
-### Getting Help
-
-**Documentation:**
-
-- User Guide (this document)
-- API Documentation
-- Integration guides
-
-**Support Channels:**
-
-- GitHub Issues for bug reports
-- GitHub Discussions for questions
-- Email support for enterprise customers
-
-**Self-Service Tools:**
-
-- System health dashboard
-- Log viewing for scan details
-- Configuration validation tools
+Notification failures do not block a completed scan, but repeated delivery
+failures should be investigated in the backend logs.
 
 ---
 
-## 📚 Best Practices
+## Account and API Access
 
-### Effective Security Scanning
+### Sessions
 
-**1. Regular Scanning**
+View and revoke active sessions, or sign out of all sessions. Revoke unknown
+sessions immediately and change the password.
 
-- Set up automatic scans for all active branches
-- Schedule daily scans for critical projects
-- Perform immediate scans after security-related changes
+### API tokens
 
-**2. Proper Configuration**
+Create API tokens for automation. The token value is shown only once.
+Use it as a bearer token:
 
-- Configure appropriate exclusions for third-party code
-- Customize rules for your technology stack
-- Set up meaningful notification thresholds
+```http
+Authorization: Bearer <token>
+```
 
-**3. Result Management**
+Set an expiration when creating a token and revoke unused tokens. Scopes and IP
+allowlists can be recorded, but they are not yet enforced; treat every token as
+having full access to your account.
 
-- Review all high and critical vulnerabilities immediately
-- Establish SLAs for vulnerability remediation
-- Track progress on security improvements
+### Notifications and profile
 
-### Workflow Integration
-
-**1. Development Process**
-
-- Integrate scanning into CI/CD pipelines
-- Require security approval for production deployments
-- Train developers on secure coding practices
-
-**2. Security Team Workflow**
-
-- Use the platform for security assessments
-- Generate reports for compliance audits
-- Track security metrics and trends
-
-**3. Management Reporting**
-
-- Use executive summaries for stakeholder communication
-- Create custom dashboards for different audiences
-- Schedule automated reports for regular updates
-
-### Optimization Tips
-
-**1. Performance Optimization**
-
-- Use file exclusions to reduce scan time
-- Schedule heavy scans during off-hours
-- Monitor resource usage and optimize accordingly
-
-**2. Result Quality**
-
-- Regularly review and update custom rules
-- Maintain whitelists for false positives
-- Provide feedback on AI analysis accuracy
-
-**3. Cost Management**
-
-- Monitor AI analysis token usage
-- Optimize scan frequency based on project activity
-- Use severity filtering to focus on critical issues
+Update display name, avatar, organization, department, and notification
+preferences in Settings. Changing email or password requires the current
+credentials.
 
 ---
 
-## 🔄 Advanced Usage
+## Troubleshooting
 
-### API Integration
+| Problem | Check |
+|---|---|
+| Cannot sign in | Credentials, account status, lockout, 2FA code, SSO configuration |
+| Scan will not start | Repository URL, branch, SCM access, project access |
+| Scan finds fewer results | Scanner binaries, optional scanner flags, scanner health |
+| AI features unavailable | Provider keys, provider chain, Ollama availability |
+| No webhook scans | URL `/api/webhook/`, secret/signature, SCM delivery logs |
+| Schedule does not run | Backend scheduler, timezone, project access, backend worker count |
+| Report missing | Scan status, backend logs, MongoDB connectivity |
+| Charts or live updates stale | WebSocket connection and reverse-proxy upgrade headers |
 
-**Using the REST API:**
-
-- Submit scans programmatically
-- Retrieve reports in various formats
-- Integrate with existing security tools
-
-**Webhook Integration:**
-
-- Receive real-time notifications
-- Trigger external workflows
-- Integrate with SIEM systems
-
-### Custom Dashboards
-
-**Creating Custom Views:**
-
-- Filter data by project, severity, or time period
-- Create role-specific dashboards
-- Export dashboard data for external reporting
-
-### Automation Workflows
-
-**Automated Response:**
-
-- Set up automated ticket creation for vulnerabilities
-- Configure automatic notifications for different severity levels
-- Integrate with change management systems
-
----
-
-## 📞 Support & Resources
-
-### Getting Additional Help
-
-**Community Support:**
-
-- [GitHub Discussions](https://github.com/Sagar4173/ONYX/discussions)
-- [User Forum](https://forum.onyx-security.ai)
-- [Community Slack](https://slack.onyx-security.ai)
-
-**Enterprise Support:**
-
-- Dedicated support team
-- Priority response times
-- Custom integration assistance
-- Training and onboarding
-
-**Documentation:**
-
-- [Installation Guide](./INSTALLATION.md)
-- [API Documentation](./API.md)
-- [Architecture Guide](./ARCHITECTURE.md)
-- [Contributing Guide](./CONTRIBUTING.md)
-
-### Feature Requests & Feedback
-
-We welcome feedback and feature requests! Please use our GitHub repository to:
-
-- Report bugs
-- Request new features
-- Share usage feedback
-- Contribute improvements
-
----
-
-**Thank you for using ONYX Security Intelligence Platform!**
-
-We're committed to helping you build more secure software through intelligent automation and comprehensive security analysis.
+For deployment failures, see [Deployment](DEPLOYMENT.md). For a suspected
+vulnerability, follow [SECURITY.md](../SECURITY.md).

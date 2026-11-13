@@ -1,479 +1,265 @@
-# 👥 ONYX Team Guide
+# ONYX Team Guide
 
-> **Internal Reference Document**  
-> **Last Updated**: December 2025  
-> **🎯 MISSION: Build a BETTER platform than GitHub Advanced Security (GHAS) & Snyk**
-
----
-
-## 💡 Why We're Building This
-
-### The Problem with GHAS & Snyk
-
-| Issue                 | GHAS           | Snyk                    | ONYX Solution        |
-| --------------------- | -------------- | ----------------------- | -------------------- |
-| **Cost**              | $49/user/month | $52/user/month          | ✅ FREE              |
-| **AI Analysis**       | ❌ None        | ⚠️ Basic                | ✅ GPT-4 + Gemini    |
-| **Platform Lock-in**  | GitHub only    | Multiple but fragmented | ✅ Unified + Any SCM |
-| **Custom Rules**      | Limited        | Limited                 | ✅ Full rule engine  |
-| **Self-Hosting**      | Impossible     | Enterprise $$$$         | ✅ Free              |
-| **Real-time Updates** | Polling        | Polling                 | ✅ WebSocket         |
-
-### Our Competitive Edge
-
-```
-🤖 AI-FIRST APPROACH
-   - GPT-4 + Gemini for intelligent analysis
-   - Auto-remediation suggestions
-   - False positive detection
-   - Code fix generation
-
-   >>> GHAS and Snyk have NOTHING like this!
-```
+- **Updated:** 2026-10-28
+- **Purpose:** Shared operating context for developers, security engineers, and
+  deployment owners.
 
 ---
 
-## 🧑‍💻 Team Members & Responsibilities
+## Team Ownership
 
 ### Sagar Wavhal - Lead Developer
 
-**GitHub**: [@Sagar4173](https://github.com/Sagar4173)
+GitHub: [@Sagar4173](https://github.com/Sagar4173)
 
-#### 🎯 Mission: Build AI Features That Competitors Don't Have
+Primary ownership:
 
-#### Primary Responsibilities
+- backend architecture and API composition
+- frontend application and integration
+- AI providers, retrieval, agents, and triage
+- MongoDB models and service boundaries
+- security-sensitive application changes
 
-- Platform architecture decisions
-- Backend API development (FastAPI)
-- Frontend development (React)
-- **AI integration (OpenAI/Gemini)** ← Our biggest advantage!
-- Database design (MongoDB)
-- Code review & mentoring
-
-#### Current Focus - Beat Competitors
-
-- [ ] **AI Chat Assistant** - Ask questions about vulnerabilities (GHAS/Snyk don't have this!)
-- [ ] **Auto-Fix PRs** - AI generates fix PRs automatically
-- [ ] **Intelligent Triage** - AI prioritizes by business impact
-- [ ] Performance optimization
-- [ ] AI response quality improvement
-
-#### Key Files Owned
-
-```
-backend/
-├── app.py
-├── config.py
-├── services/ai/
-├── routes/
-frontend/
-├── src/App.jsx
-├── src/services/api.js
-```
-
----
+Key files: `backend/app.py`, `backend/config.py`, `backend/routes/`,
+`backend/services/ai/`, `frontend/src/App.jsx`, `frontend/src/services/api.js`.
 
 ### Piyush More - Security Expert
 
-**GitHub**: [@MorePiyush55](https://github.com/MorePiyush55)
+GitHub: [@MorePiyush55](https://github.com/MorePiyush55)
 
-#### 🎯 Mission: Make Our Scanning BETTER Than Snyk's
+Primary ownership:
 
-#### Primary Responsibilities
+- scanner integrations and finding normalization
+- compliance mappings and reporting
+- security rules, baselines, and drift analysis
+- threat intelligence and vulnerability assessment
+- security review of scanner and AI workflows
 
-- Security scanner integration
-- Vulnerability assessment rules
-- **Compliance framework mapping** ← We support 9 frameworks (more than GHAS!)
-- Security testing
-- Threat analysis
-
-#### Current Focus - Beat Competitors
-
-- [ ] **Custom rule library** - More rules than Snyk
-- [ ] **AI-powered false positive reduction** - Snyk doesn't have this!
-- [ ] **Expand compliance** - Add more frameworks than competitors
-- [ ] Custom rule development
-- [ ] Compliance coverage expansion
-
-#### Key Files Owned
-
-```
-backend/
-├── services/scanning/
-├── services/compliance/
-├── services/security/
-├── services/rules/
-├── configs/
-│   ├── custom-semgrep-rules.yaml
-│   ├── gitleaks-custom.toml
-│   └── compliance_mapping.json
-```
-
----
+Key files: `backend/services/scanning/`, `backend/services/compliance/`,
+`backend/services/security/`, `backend/services/rules/`.
 
 ### Rushikesh Phalke - DevOps Engineer
 
-**GitHub**: [@rushiphalke247](https://github.com/rushiphalke247)
+GitHub: [@rushiphalke247](https://github.com/rushiphalke247)
 
-#### 🎯 Mission: Make ONYX FASTER Than Competitors
+Primary ownership:
 
-#### Primary Responsibilities
+- Jenkins/EC2 deployment and rollback procedures
+- Docker images, Compose, and nginx
+- GitHub Actions CI
+- host capacity, logs, backups, and monitoring
+- environment configuration and secret handling
 
-- Deployment automation
-- Infrastructure management
-- CI/CD pipelines
-- **Performance monitoring** ← Speed is a competitive advantage!
-- Server administration
-
-#### Current Focus - Beat Competitors
-
-- [ ] **Scan speed optimization** - Target: faster than Snyk
-- [ ] **Real-time performance** - WebSocket already beats their polling
-- [ ] **Zero-downtime deploys** - Better reliability than competitors
-- [ ] Render optimization
-- [ ] MongoDB performance
-- [ ] Monitoring setup
-
-#### Key Files Owned
-
-```
-backend/
-├── render.yaml
-├── RENDER_DEPLOY.md
-├── requirements.txt
-frontend/
-├── vercel.json
-├── vite.config.js
-docs/
-├── DEPLOYMENT.md
-```
+Key files: `Jenkinsfile`, `deploy/`, `docker-compose.yml`, `backend/Dockerfile`,
+`frontend/Dockerfile`, `frontend/nginx.conf`, `.github/workflows/ci.yml`.
 
 ---
 
-## 🔧 Development Setup
+## Current Runtime Shape
 
-### Prerequisites
+- Frontend: React 18 SPA built with Vite, served by nginx.
+- Backend: FastAPI on Python 3.13, run by systemd on EC2 or by Uvicorn in
+  Compose.
+- Database: MongoDB 7+; required.
+- AI: Gemini → Groq → OpenRouter → Ollama by default when `AI_PROVIDER=auto`.
+  OpenAI is legacy/explicit.
+- Scanning: 13 integrations; external binaries are optional and degrade
+  gracefully when absent.
+- Current deployment: Jenkins + EC2 + systemd + nginx, optionally Ollama.
+- Alternative deployment: Docker Compose with internal backend/MongoDB and
+  frontend nginx.
 
-```bash
-# Backend
-Python 3.11+
-MongoDB (local or Atlas)
-Git
+---
 
-# Frontend
-Node.js 18+
-npm or yarn
+## Local Setup
+
+```powershell
+git clone https://github.com/Sagar4173/ONYX.git
+cd ONYX\backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python main.py
 ```
 
-### Quick Start
+In another terminal:
 
-```bash
-# Clone repository
-git clone https://github.com/Sagar4173/ONYX.git
-cd ONYX
-
-# Backend setup
-cd backend
-cp .env.example .env
-# Edit .env with your credentials
-pip install -r requirements.txt
-python main.py
-
-# Frontend setup (new terminal)
-cd frontend
-cp .env.example .env
+```powershell
+cd ONYX\frontend
 npm install
 npm run dev
 ```
 
-### Environment Variables
+URLs: frontend `http://localhost:5173`, API `http://localhost:8000`, OpenAPI
+`http://localhost:8000/docs`.
 
-#### Backend (.env)
-
-```env
-MONGODB_URI=your-mongodb-uri
-SECRET_KEY=your-secret-key
-ALLOWED_ORIGINS=http://localhost:5173
-AI_PROVIDER=gemini
-GEMINI_API_KEY=your-gemini-key
-```
-
-#### Frontend (.env)
-
-```env
-VITE_API_URL=http://127.0.0.1:8000/api
-VITE_WS_URL=ws://127.0.0.1:8000
-```
+Set `SECRET_KEY` and `MONGODB_URI` before starting. Do not use the example
+secret outside local development.
 
 ---
 
-## 📂 Codebase Overview
+## Repository Map
 
-### Backend Structure (FastAPI)
-
-```
+```text
 backend/
-├── app.py              # Main application entry
-├── main.py             # Uvicorn runner
-├── config.py           # Environment configuration
-├── database.py         # MongoDB connection
-│
-├── models/             # Beanie ODM models
-│   ├── user.py         # User model
-│   ├── project.py      # Project model
-│   └── report.py       # Report model
-│
-├── routes/             # API endpoints
-│   ├── auth.py         # /api/auth/*
-│   ├── users.py        # /api/users/*
-│   ├── projects.py     # /api/projects/*
-│   ├── reports.py      # /api/reports/*
-│   ├── security.py     # /api/security/*
-│   └── ...
-│
-├── services/           # Business logic
-│   ├── ai/             # AI processors
-│   ├── auth/           # Authentication
-│   ├── scanning/       # Security scanners
-│   ├── compliance/     # Compliance engines
-│   └── ...
-│
-├── configs/            # Configuration files
-│   ├── custom-semgrep-rules.yaml
-│   └── gitleaks-custom.toml
-│
-└── data/               # Runtime data storage
-```
+├── app.py                 # middleware, router composition, WebSocket
+├── config.py              # settings and AI provider chain
+├── database.py            # Beanie initialization
+├── models/                # documents and schemas
+├── routes/                # domain route packages
+├── services/              # business logic
+│   ├── ai/                # providers, RAG, agents, ML, enrichment
+│   ├── scanning/          # orchestrator and scanner implementations
+│   ├── compliance/
+│   ├── notifications/
+│   ├── infrastructure/    # encryption and monitoring
+│   ├── scheduling/
+│   ├── scm/
+│   ├── auth/
+│   ├── analytics/
+│   ├── rules/
+│   ├── security/
+│   └── triage/
+├── knowledge/             # RAG corpus sources
+├── data/                  # runtime SQLite and generated artifacts
+└── tests/                 # pytest suite
 
-### Frontend Structure (React)
-
-```
-frontend/src/
-├── App.jsx             # Main app component
-├── main.jsx            # React entry point
-│
-├── components/         # Reusable components
-│   ├── auth/           # Authentication
-│   ├── projects/       # Project management
-│   ├── reports/        # Report views
-│   ├── security/       # Security dashboards
-│   └── ...
-│
-├── layouts/            # Page layouts
-│   ├── MainLayout.jsx  # Authenticated layout
-│   ├── Sidebar.jsx     # Navigation sidebar
-│   └── Header.jsx      # Top header
-│
-├── pages/              # Page components
-│   ├── Dashboard.jsx
-│   ├── Analytics.jsx
-│   └── Reports.jsx
-│
-├── services/           # API communication
-│   └── api.js          # Axios API client
-│
-└── styles/             # Styling utilities
+frontend/
+├── src/components/
+├── src/layouts/
+├── src/pages/
+├── src/services/api.js
+├── src/styles/
+├── e2e/                   # Playwright smoke tests
+├── nginx.conf
+└── Dockerfile
 ```
 
 ---
 
-## 🔄 Git Workflow
+## Verification Commands
 
-### Branches
-
-| Branch      | Purpose                    |
-| ----------- | -------------------------- |
-| `master`    | Production code (deployed) |
-| `develop`   | Development staging        |
-| `feature/*` | New features               |
-| `fix/*`     | Bug fixes                  |
-| `hotfix/*`  | Urgent production fixes    |
-
-### Commit Convention
-
-```
-type(scope): description
-
-Types:
-- feat: New feature
-- fix: Bug fix
-- docs: Documentation
-- style: Formatting
-- refactor: Code restructure
-- test: Tests
-- chore: Maintenance
-
-Examples:
-feat(auth): add password reset functionality
-fix(scanner): resolve timeout issue for large repos
-docs(api): update endpoint documentation
-```
-
-### Pull Request Process
-
-1. Create feature branch from `develop`
-2. Make changes and commit
-3. Push branch and create PR
-4. Request review from relevant team member
-5. Address feedback
-6. Merge after approval
-
----
-
-## 🧪 Testing
-
-### Backend Tests
-
-```bash
+```powershell
 cd backend
-pytest tests/ -v
+.\.venv\Scripts\python.exe -m pytest -q
+
+cd ..\frontend
+cmd /c "npm test -- --reporter=dot"
+cmd /c "npm run lint"
+cmd /c "npm run build"
+
+cd ..
+git diff --check
 ```
 
-### Frontend Tests
+Current verified counts: 940 backend tests, 413 frontend tests.
+
+Before declaring a change complete:
+
+1. Run targeted tests for the changed area.
+2. Run the broader suite when the change crosses modules.
+3. Check authentication/authorization on new routes.
+4. Check external input, secrets, URLs, and error messages.
+5. Update living docs and route inventories.
+6. Record anything not verified.
+
+---
+
+## Git and Review Rules
+
+- Default branch: `master`.
+- Use focused branches: `feature/*`, `fix/*`, `docs/*`, `refactor/*`.
+- Commit format: `type(scope): description`.
+- Stage explicit paths; never stage `.env`, credentials, generated artifacts, or
+  `.superpowers/` ledgers.
+- Do not force-push shared branches.
+- Do not merge with unresolved critical correctness or security findings.
+- Deployment changes need rollback and verification steps.
+
+---
+
+## Operational Checks
+
+### Health
 
 ```bash
-cd frontend
-npm test
+curl -fsS http://localhost:8000/health
+curl -fsS http://localhost/health
+curl -fsS http://localhost:11434/api/tags   # only for local Ollama
 ```
 
-### Manual Testing Checklist
-
-- [ ] User registration/login
-- [ ] Project creation
-- [ ] Security scan execution
-- [ ] Report generation
-- [ ] PDF export
-- [ ] WebSocket notifications
-
----
-
-## 📞 Communication
-
-### Daily Sync
-
-- Time: 10:00 AM IST
-- Duration: 15 minutes
-- Focus: Blockers & priorities
-
-### Weekly Review
-
-- Day: Friday
-- Duration: 1 hour
-- Focus: Progress & planning
-
-### Channels
-
-| Channel            | Purpose                |
-| ------------------ | ---------------------- |
-| GitHub Issues      | Bug reports & features |
-| GitHub Discussions | Technical discussions  |
-| WhatsApp Group     | Quick communication    |
-
----
-
-## 🚨 Incident Response
-
-### If Production is Down
-
-1. Check Render dashboard for backend status
-2. Check Vercel dashboard for frontend status
-3. Check MongoDB Atlas for database issues
-4. Notify team immediately
-5. Document incident in GitHub Issues
-
-### Rollback Process
+### Scanner availability
 
 ```bash
-# Backend (Render)
-# Go to Render Dashboard > Manual Deploy > Select previous commit
-
-# Frontend (Vercel)
-# Go to Vercel Dashboard > Deployments > Redeploy previous
+curl -fsS http://localhost:8000/api/scanners/health
 ```
+
+This checks Semgrep, Trivy, GitLeaks, Bandit, and Safety. Other scanner
+integrations may still be available.
+
+### AI configuration
+
+The backend logs the configured provider chain at startup. Confirm which
+providers have usable keys and whether Ollama is reachable at
+`AI_LOCAL_BASE_URL`.
+
+### Logs
+
+- systemd: `journalctl -u onyx-backend`
+- Compose: `docker compose logs -f backend`
+- nginx: `/var/log/nginx/error.log`
+- Ollama: `$HOME/ollama/ollama.log` in the current Jenkins setup
 
 ---
 
-## 📚 Resources
+## Deployment Ownership
 
-### Documentation
+Before deploying:
 
-- [FastAPI Docs](https://fastapi.tiangolo.com/)
-- [React Docs](https://react.dev/)
-- [MongoDB Manual](https://www.mongodb.com/docs/manual/)
-- [Tailwind CSS](https://tailwindcss.com/docs)
+- confirm database backup
+- confirm `SECRET_KEY`, `MONGODB_URI`, `FRONTEND_URL`, `CORS_ORIGINS`, and
+  `WEBHOOK_SECRET` are set
+- confirm frontend production URL is not `127.0.0.1`
+- confirm optional scanner binaries and AI model availability
+- run tests locally or in CI
 
-### Security Tools
+After deploying:
 
-- [Semgrep Rules](https://semgrep.dev/explore)
-- [Trivy Documentation](https://aquasecurity.github.io/trivy/)
-- [GitLeaks](https://github.com/gitleaks/gitleaks)
+- verify `/health` through nginx
+- verify login and one authenticated page
+- verify a manual scan and webhook event in a non-production project
+- verify WebSocket updates
+- check backend and nginx logs
+- record the deployed commit
 
-### AI APIs
-
-- [OpenAI API](https://platform.openai.com/docs)
-- [Google Gemini](https://ai.google.dev/docs)
-
-### Competitor Research
-
-- [GitHub Advanced Security](https://docs.github.com/en/code-security)
-- [Snyk Documentation](https://docs.snyk.io/)
-- [GHAS Pricing](https://github.com/pricing) - $49/user/month
-- [Snyk Pricing](https://snyk.io/plans/) - $52/developer/month
+Use `deploy/README.md` for first-time EC2 setup, host verification, DNS/TLS, and
+the operator handoff checklist. The Jenkins pipeline records the last successful
+commit and invokes `scripts/rollback.sh` after a post-publish failure. Rollback
+restores code, services, and frontend assets only; keep a database backup before
+changing production. Verify the rollback path on the EC2 host after pipeline
+changes.
 
 ---
 
-## 🏆 Competitive Battle Plan
+## Secrets and Data
 
-### What We Have That GHAS Doesn't
+- Never place secrets in code, docs, logs, or issue reports.
+- Use least-privilege SCM tokens.
+- Rotate `AUTO_FIX_TOKEN` after exposure or team changes.
+- Rotate `WEBHOOK_SECRET` through the admin endpoint, restart the backend, then
+  update the SCM webhook.
+- Avoid changing `SECRET_KEY` without a migration plan: it signs JWTs and
+  derives the field-encryption key.
+- Treat AI output and fetched repository content as untrusted input.
 
-| Feature                    | Status  | Impact                      |
-| -------------------------- | ------- | --------------------------- |
-| AI Analysis (GPT-4/Gemini) | ✅ Live | 🔥 HUGE - They have NOTHING |
-| Multi-SCM Support          | ✅ Live | Users not locked to GitHub  |
-| Custom Rule Engine         | ✅ Live | Full flexibility            |
-| Real-time WebSocket        | ✅ Live | Better UX than polling      |
-| Self-Hosted Option         | ✅ Live | Data sovereignty            |
-| Free & Open Source         | ✅ Live | $0 vs $49/user/month        |
+---
 
-### What We Have That Snyk Doesn't
+## Documentation Responsibilities
 
-| Feature                    | Status  | Impact                         |
-| -------------------------- | ------- | ------------------------------ |
-| AI Analysis (GPT-4/Gemini) | ✅ Live | 🔥 HUGE - They only have basic |
-| Unified Dashboard          | ✅ Live | All tools in one place         |
-| Free Self-Hosting          | ✅ Live | Snyk charges $$$ for this      |
-| Real-time WebSocket        | ✅ Live | Better UX than polling         |
-| Custom Rules               | ✅ Live | More flexibility               |
-| Free & Open Source         | ✅ Live | $0 vs $52/user/month           |
-
-### Features to Build to CRUSH Competition
-
-| Priority | Feature                      | Why It Wins                                        |
-| -------- | ---------------------------- | -------------------------------------------------- |
-| 🔴 P0    | **AI Chat Assistant**        | Ask questions about vulns - NO competitor has this |
-| 🔴 P0    | **Auto-Fix PRs**             | AI creates fix PRs automatically - Game changer    |
-| 🟡 P1    | **VS Code Extension**        | Security in the IDE - Better developer experience  |
-| 🟡 P1    | **Slack/Teams Alerts**       | Real-time notifications where teams work           |
-| 🟢 P2    | **Vulnerability Prediction** | ML predicts where bugs will appear - UNIQUE        |
-
-### Team Weekly Goals
-
-```
-Every sprint, ask yourself:
-
-1. "Does this feature make us better than GHAS?"
-2. "Does this feature make us better than Snyk?"
-3. "Would a user choose ONYX over competitors because of this?"
-
-If the answer is YES to any - prioritize it! 🚀
-```
-
-### Competitive Metrics to Track
-
-| Metric               | Our Goal           | GHAS     | Snyk     |
-| -------------------- | ------------------ | -------- | -------- |
-| Scan Speed           | <30s for 10MB repo | ~1 min   | ~45s     |
-| AI Response Time     | <5s                | N/A      | N/A      |
-| Supported Frameworks | 9+ compliance      | 3-4      | 5-6      |
-| Custom Rules         | Unlimited          | Limited  | Limited  |
-| Price                | $0                 | $49/user | $52/user |
+- API routes: update `docs/API.md`.
+- Feature status: update `docs/PROJECT_STATUS.md`.
+- Deployment behavior: update `docs/DEPLOYMENT.md` and `SECURITY.md`.
+- Architecture: update `docs/ARCHITECTURE.md` when data flow or components change.
+- Dated plans under `docs/superpowers/` are historical records. Do not rewrite
+  them; add a new dated note when superseded.
