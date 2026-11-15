@@ -1,0 +1,103 @@
+---
+- name: Automate Jenkins CI/CD Setup on Amazon Linux 2023
+  hosts: jenkins_servers
+  become: true
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: 0. Verify and display target domain
+      ansible.builtin.debug:
+        msg: "Configuring Jenkins for domain: {{ jenkins_domain }}"
+
+    - name: 1. Ensure system prerequisites are installed
+      ansible.builtin.dnf:
+        name:
+          - java-21-amazon-corretto
+          - wget
+          - curl
+          - git
+          - rsync
+        state: present
+        update_cache: true
+
+    - name: 2. Download Jenkins repository file
+      ansible.builtin.get_url:
+        url: "{{ jenkins_repo_url }}"
+        dest: /etc/yum.repos.d/jenkins.repo
+        mode: '0644'
+
+    - name: 3. Import Jenkins GPG key
+      ansible.builtin.rpm_key:
+        state: present
+        key: "{{ jenkins_gpg_key_url }}"
+
+    - name: 4. Install Jenkins package
+      ansible.builtin.dnf:
+        name: jenkins
+        state: present
+        update_cache: true
+
+    - name: 5. Add jenkins user to app group (ec2-user)
+      ansible.builtin.user:
+        name: jenkins
+        groups: "{{ app_user }}"
+        append: true
+
+    - name: 6. Ensure ec2-user home directory is accessible to jenkins
+      ansible.builtin.file:
+        path: "/home/{{ app_user }}"
+        mode: '0755'
+
+    - name: 7. Deploy scoped sudoers rule for jenkins user
+      ansible.builtin.template:
+        src: templates/jenkins_sudoers.j2
+        dest: /etc/sudoers.d/jenkins
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: 8. Deploy Nginx reverse proxy configuration for Jenkins
+      ansible.builtin.template:
+        src: templates/jenkins.conf.j2
+        dest: /etc/nginx/conf.d/jenkins.conf
+        mode: '0644'
+      notify: Reload Nginx
+
+    - name: 9. Test Nginx configuration
+      ansible.builtin.command:
+        cmd: nginx -t
+      changed_when: false
+
+    - name: 10. Enable and start Jenkins service
+      ansible.builtin.systemd:
+        name: jenkins
+        state: started
+        enabled: true
+
+    - name: 11. Wait for Jenkins to create the initial admin password file
+      ansible.builtin.wait_for:
+        path: /var/lib/jenkins/secrets/initialAdminPassword
+        timeout: 120
+
+    - name: 12. Read Jenkins initial admin password
+      ansible.builtin.slurp:
+        src: /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_password_b64
+
+    - name: 13. Display initial credentials and completion message
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "  JENKINS SETUP COMPLETED SUCCESSFULLY"
+          - "=========================================================="
+          - "Domain: {{ jenkins_domain }}"
+          - "URL: http://{{ jenkins_domain }}"
+          - "Initial Admin Password: {{ jenkins_password_b64.content | b64decode | trim }}"
+          - "Run 'sudo certbot --nginx -d {{ jenkins_domain }}' to enable SSL"
+          - "=========================================================="
+
+  handlers:
+    - name: Reload Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded

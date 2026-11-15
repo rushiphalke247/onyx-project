@@ -1,0 +1,218 @@
+================================================================================
+          ONYX SECURITY INTELLIGENCE PLATFORM - PRODUCTION RUNBOOK
+================================================================================
+Host Target:      Amazon Linux 2023 (EC2 t3.micro, 30GB gp3)
+Domain:           onyx.ajuna.website
+Repository:       https://github.com/Sagar4173/ONYX.git (branch: master)
+Deployment Path:  /home/ec2-user/ONYX
+Stack:            Python 3.13 (Uvicorn / FastAPI), Node.js 22 (React / Vite),
+                  Nginx, Let's Encrypt SSL, MongoDB Atlas
+================================================================================
+
+--------------------------------------------------------------------------------
+STEP 1: SWAP SPACE CONFIGURATION (MANDATORY FOR t3.micro)
+--------------------------------------------------------------------------------
+Because t3.micro only has 1 GB RAM, a 4 GB swap file is mandatory to prevent
+the Linux Out-of-Memory (OOM) killer from terminating npm build / pip.
+
+sudo dd if=/dev/zero of=/swapfile bs=128M count=32
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
+free -h
+
+--------------------------------------------------------------------------------
+STEP 2: RUNTIME PACKAGE INSTALLATION (install-packages.sh)
+--------------------------------------------------------------------------------
+File: deploy/scripts/install-packages.sh
+Installs: git, curl, openssl, rsync, nginx, python3.13, python3.13-pip,
+          nodejs22, nodejs22-npm, certbot, python3-certbot-nginx, zstd.
+
+sudo dnf makecache --refresh
+sudo dnf install -y --allowerasing \
+    git curl openssl rsync nginx \
+    python3.13 python3.13-pip \
+    nodejs22 nodejs22-npm \
+    certbot python3-certbot-nginx zstd
+
+sudo systemctl enable --now nginx
+sudo systemctl enable --now certbot-renew.timer
+
+# Ensure Node 22 and npm 22 are default:
+sudo alternatives --set node /usr/bin/node-22
+sudo alternatives --set npm /usr/bin/npm-22
+
+# Verify:
+python3.13 --version   # Output: Python 3.13.x
+node --version         # Output: v22.x.x
+npm --version          # Output: 10.x.x
+nginx -v
+certbot --version
+
+--------------------------------------------------------------------------------
+STEP 3: CLONE PROJECT REPOSITORY
+--------------------------------------------------------------------------------
+Run as ec2-user:
+
+git clone https://github.com/Sagar4173/ONYX.git /home/ec2-user/ONYX
+cd /home/ec2-user/ONYX
+chmod +x deploy/scripts/*.sh
+
+--------------------------------------------------------------------------------
+STEP 4: CONFIGURE ENVIRONMENT FILES (.env)
+--------------------------------------------------------------------------------
+1. Generate secure secret tokens:
+   openssl rand -hex 32
+   openssl rand -hex 32
+
+2. Backend configuration:
+   File: /home/ec2-user/ONYX/backend/.env
+   Template: deploy/env/backend.production.env.example
+
+   cp deploy/env/backend.production.env.example backend/.env
+   chmod 600 backend/.env
+   nano backend/.env
+
+   Key values to configure:
+   ------------------------------------------------------------
+   ENVIRONMENT=production
+   DEBUG=false
+   SECRET_KEY=<generated_hex_32_token_1>
+   WEBHOOK_SECRET=<generated_hex_32_token_2>
+   HOST=127.0.0.1
+   PORT=8000
+   WORKERS=1
+   MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/onyx?retryWrites=true&w=majority
+   DATABASE_NAME=onyx
+   FRONTEND_URL=https://onyx.ajuna.website
+   CORS_ORIGINS=https://onyx.ajuna.website,http://onyx.ajuna.website
+   ALLOWED_ORIGINS=https://onyx.ajuna.website,http://onyx.ajuna.website
+   ALLOW_REGISTRATION=true
+   AI_PROVIDER=auto
+   AI_PROVIDER_CHAIN=gemini,groq,openrouter,ollama
+   GEMINI_API_KEY=<optional_gemini_api_key>
+   GEMINI_MODEL=gemini-2.5-flash
+   ------------------------------------------------------------
+
+3. Frontend configuration:
+   File: /home/ec2-user/ONYX/frontend/.env
+   Template: deploy/env/frontend.production.env.example
+
+   cp deploy/env/frontend.production.env.example frontend/.env
+   chmod 600 frontend/.env
+   nano frontend/.env
+
+   Key values to configure:
+   ------------------------------------------------------------
+   VITE_API_URL=/api
+   VITE_WS_URL=
+   VITE_APP_NAME=ONYX Security Intelligence Platform
+   VITE_ENVIRONMENT=production
+   ------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+STEP 5: BOOTSTRAP APPLICATION (bootstrap-app.sh)
+--------------------------------------------------------------------------------
+File: deploy/scripts/bootstrap-app.sh
+Creates python3.13 venv, installs requirements, builds frontend (Vite),
+and publishes assets to /var/www/onyx.
+
+cd /home/ec2-user/ONYX
+./deploy/scripts/bootstrap-app.sh
+
+--------------------------------------------------------------------------------
+STEP 6: INSTALL SECURITY SCANNERS (Into Virtual Environment)
+--------------------------------------------------------------------------------
+ONYX systemd service loads /home/ec2-user/ONYX/backend/venv/bin into PATH.
+Install missing scanners so the health check activates all 6 scanners:
+
+VENV_BIN="/home/ec2-user/ONYX/backend/venv/bin"
+
+# 1. Semgrep, Bandit, Safety
+$VENV_BIN/pip install --no-cache-dir bandit safety semgrep
+
+# 2. Gitleaks
+GL_VER=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -o '"tag_name": *"v[^"]*"' | cut -d'"' -f4 | tr -d 'v')
+curl -fsSL -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GL_VER}/gitleaks_${GL_VER}_linux_x64.tar.gz"
+tar -xzf /tmp/gitleaks.tgz -C "$VENV_BIN" gitleaks
+chmod +x "$VENV_BIN/gitleaks"
+rm -f /tmp/gitleaks.tgz
+
+# 3. Trivy
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b "$VENV_BIN"
+
+--------------------------------------------------------------------------------
+STEP 7: INSTALL HOST CONFIGURATION (SYSTEMD & NGINX)
+--------------------------------------------------------------------------------
+File: deploy/scripts/install-host-config.sh
+Installs:
+- /etc/systemd/system/onyx-backend.service
+- /etc/nginx/conf.d/onyx.conf
+
+sudo env \
+  ONYX_DOMAIN=onyx.ajuna.website \
+  ONYX_USER=ec2-user \
+  ONYX_PROJECT_DIR=/home/ec2-user/ONYX \
+  /home/ec2-user/ONYX/deploy/scripts/install-host-config.sh
+
+--------------------------------------------------------------------------------
+STEP 8: DOMAIN RESOLUTION & LOCAL LOOPBACK FIX
+--------------------------------------------------------------------------------
+Ensure DNS A record points onyx.ajuna.website -> EC2 Public IP (Cloudflare Grey Cloud).
+Add local loopback to avoid hairpin timeouts on EC2:
+
+echo "127.0.0.1 onyx.ajuna.website" | sudo tee -a /etc/hosts
+
+Test HTTP health check:
+curl -fsS http://onyx.ajuna.website/health
+
+--------------------------------------------------------------------------------
+STEP 9: SSL / HTTPS CERTIFICATE SETUP (enable-tls.sh)
+--------------------------------------------------------------------------------
+File: deploy/scripts/enable-tls.sh
+Requests Let's Encrypt certificate and enables automatic renewal:
+
+sudo env ONYX_EMAIL="alerts.onyx@gmail.com" \
+  /home/ec2-user/ONYX/deploy/scripts/enable-tls.sh onyx.ajuna.website
+
+--------------------------------------------------------------------------------
+STEP 10: VERIFICATION & SMOKE TEST
+--------------------------------------------------------------------------------
+Files:
+- deploy/scripts/preflight.sh
+- deploy/scripts/smoke-test.sh
+
+cd /home/ec2-user/ONYX
+./deploy/scripts/preflight.sh
+ONYX_TLS_DOMAIN="onyx.ajuna.website" ./deploy/scripts/smoke-test.sh
+
+Expected Outcome:
+PASS  service active: onyx-backend
+PASS  service active: nginx
+PASS  backend health endpoint reports healthy
+PASS  nginx root (200)
+PASS  nginx health proxy (200)
+PASS  public stats API (200)
+PASS  API documentation (200)
+PASS  API ReDoc (200)
+PASS  OpenAPI schema (200)
+PASS  security header: X-Content-Type-Options
+PASS  security header: X-Frame-Options
+PASS  SPA fallback (/dashboard)
+PASS  HTTPS root (200)
+PASS  HTTPS health (200)
+PASS  HTTP redirects to HTTPS (301)
+Summary: 0 failure(s), 0 warning(s)
+
+--------------------------------------------------------------------------------
+STEP 11: POST-DEPLOYMENT LOCKDOWN
+--------------------------------------------------------------------------------
+1. Navigate to https://onyx.ajuna.website
+2. Register the initial administrator account.
+3. Lock down public registration:
+   nano /home/ec2-user/ONYX/backend/.env
+   Set: ALLOW_REGISTRATION=false
+   sudo systemctl restart onyx-backend
+================================================================================
+

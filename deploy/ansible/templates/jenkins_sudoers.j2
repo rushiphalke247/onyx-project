@@ -1,0 +1,10 @@
+# Scoped passwordless sudo permissions for Jenkins CI/CD pipeline
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart onyx-backend
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload nginx
+jenkins ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/install -d -m 0755 {{ web_root }}
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/rsync -a --delete --chown=root\:root {{ app_project_dir }}/frontend/dist/ {{ web_root }}/
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/chmod -R u=rwX\,go=rX {{ web_root }}
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/journalctl --vacuum-time=1d
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/systemd/journald.conf.d/onyx-size.conf
+jenkins ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart systemd-journald
