@@ -1,0 +1,81 @@
+    1  sudo dd if=/dev/zero of=/swapfile bs=128M count=24
+    2  sudo chmod 600 /swapfile
+    3  sudo mkswap /swapfile
+    4  sudo swapon /swapfile
+    5  echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
+    6  free
+    7  git clone https://github.com/Sagar4173/ONYX.git /home/ec2-user/ONYX
+    8  sudo yum install git -y 
+    9  git clone https://github.com/Sagar4173/ONYX.git /home/ec2-user/ONYX
+   10  cd /home/ec2-user/ONYX
+   11  cd deploy/scripts/
+   12  cat install-packages.sh 
+   13  chmod +x install-packages.sh 
+   14  ~../deploy/scripts/install-packages.sh
+   15  ~./deploy/scripts/install-packages.sh
+   16  ~/deploy/scripts/install-packages.sh
+   17  ./install-packages.sh 
+   18  ./install-packages.sh  ----skip-broken
+   19  cat install--
+   20  cat install-packages.sh 
+   21  cd 
+   22  clear
+   23  vi file.sh 
+   24  chmod +x file.sh 
+   25  /.f
+   26  ./file.sh 
+   27  cd /home/ec2-user/ONYX
+   28  cat deploy/env/backend.production.env.example 
+   29  cp deploy/env/backend.production.env.example backend/.env
+   30  cp deploy/env/frontend.production.env.example frontend/.env
+   31  chmod 600 backend/.env frontend/.env
+   32    
+   33  sudo tee /etc/yum.repos.d/mongodb-org-7.0.repo << 'EOF'
+[mongodb-org-7.0]
+name=MongoDB Repository
+baseurl=https://repo.mongodb.org/yum/amazon/2023/mongodb-org/7.0/$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://www.mongodb.org/static/pgp/server-7.0.asc
+EOF
+
+   34  sudo dnf install -y mongodb-org
+   35  sudo systemctl enable --now mongod
+   36  openssl rand -hex 32
+   37  vi backend/.env
+   38  vi secret.txt
+   39  ls 
+   40  vi backend/.env
+   41  curl ifconfig.me
+   42  sed -i 's/13\.232\.63\.159/13.127.13.193/g' filename.txt
+   43  sed -i 's/13\.232\.63\.159/13.127.13.193/g' backend/.env
+   44  cat backend/.env
+   45  curl ifconfig.me
+   46  cat frontend/.env
+   47  vi frontend/.env
+   48  sed -i 's/13\.232\.63\.159/13.127.13.193/g' frontend/.env
+   49  cd deploy/scripts/
+   50  cat bootstrap-app.sh 
+   51  ls -l 
+   52  ./deploy/scripts/bootstrap-app.sh
+   53    
+   54  ./bootstrap-app.sh 
+   55  ./home/ec2-user/ONYX/deploy/scripts/install-host-config.sh
+   56  ./install-host-config.sh 
+   57  sudo ./install-host-config.sh 
+   58  sudo ./home/ec2-user/ONYX/deploy/scripts/smoke-test.sh
+   59  sudo ./smoke-test.sh 
+   60  ./deploy/scripts/preflight.sh
+   61  preflight.sh
+   62  ./preflight.sh
+   63  sudo ./preflight.sh
+   64  curl -fsS http://127.0.0.1:8000/health
+   65  curl -fsS http://127.0.0.1/health
+   66  ./deploy/scripts/smoke-test.sh
+   67  cd /home/ec2-user/ONYX/
+   68  curl -fsS http://127.0.0.1:8000/health
+   69  curl -fsS http://127.0.0.1/health
+   70  ./deploy/scripts/smoke-test.sh
+   71  curl ifconfig.me
+   72  history 
+   73  history  >> /home/ec2-user/history.txt 

@@ -23,7 +23,7 @@ Send:
 - repository URL: `https://github.com/Sagar4173/ONYX.git`
 - branch: `master`
 - this file: `deploy/README.md`
-- target hostname: `15.12.54.85`
+- target hostname: `onyx.ajuna.website`
 - preferred deployment user and directory: `ec2-user`,
   `/home/ec2-user/ONYX`
 - EC2 Elastic IP after it is allocated
@@ -182,9 +182,9 @@ Fill in `backend/.env`:
 - `SECRET_KEY`
 - `WEBHOOK_SECRET`
 - `MONGODB_URI`
-- `FRONTEND_URL=http://15.12.54.85`
-- `CORS_ORIGINS=http://15.12.54.85`
-- `ALLOWED_ORIGINS=http://15.12.54.85`
+- `FRONTEND_URL=https://onyx.ajuna.website`
+- `CORS_ORIGINS=https://onyx.ajuna.website`
+- `ALLOWED_ORIGINS=https://onyx.ajuna.website`
 - AI provider keys, if used
 - SMTP settings, only if email verification/password reset is enabled
 
@@ -228,7 +228,7 @@ accepted explicitly.
 
 ```bash
 sudo env \
-  ONYX_DOMAIN=15.12.54.85 \
+  ONYX_DOMAIN=onyx.ajuna.website \
   ONYX_USER=ec2-user \
   ONYX_PROJECT_DIR=/home/ec2-user/ONYX \
   /home/ec2-user/ONYX/deploy/scripts/install-host-config.sh
@@ -329,7 +329,7 @@ After the Elastic IP is associated and the HTTP site is healthy, create a DNS
 record:
 
 ```text
-15.12.54.85.  A  <elastic-ip>
+onyx.ajuna.website.  A  <elastic-ip>
 ```
 
 If using Cloudflare, use DNS-only (“grey cloud”) until the certificate is
@@ -339,14 +339,14 @@ issued. After TLS is working, proxy mode can be enabled with SSL/TLS mode
 Wait for DNS:
 
 ```bash
-getent ahostsv4 15.12.54.85
+getent ahostsv4 onyx.ajuna.website
 ```
 
 Then request the certificate:
 
 ```bash
 sudo env ONYX_EMAIL=admin@example.com \
-  /home/ec2-user/ONYX/deploy/scripts/enable-tls.sh 15.12.54.85
+  /home/ec2-user/ONYX/deploy/scripts/enable-tls.sh onyx.ajuna.website
 ```
 
 The script:
@@ -365,8 +365,8 @@ sudo certbot renew --dry-run
 Verify:
 
 ```bash
-curl -fsS http://15.12.54.85/health
-ONYX_TLS_DOMAIN=15.12.54.85 ./deploy/scripts/smoke-test.sh
+curl -fsS https://onyx.ajuna.website/health
+ONYX_TLS_DOMAIN=onyx.ajuna.website ./deploy/scripts/smoke-test.sh
 ```
 
 ---
@@ -469,7 +469,7 @@ systemctl status onyx-backend nginx
 - `./deploy/scripts/preflight.sh` reports zero failures
 - `./deploy/scripts/smoke-test.sh` reports zero failures
 - `http://<elastic-ip>/health` reports `"status": "healthy"` before DNS/TLS
-- `http://15.12.54.85/health` reports `"status": "healthy"` after DNS/TLS
+- `https://onyx.ajuna.website/health` reports `"status": "healthy"` after DNS/TLS
 - `certbot renew --dry-run` succeeds
 - a Jenkins push to `master` deploys successfully
 - a deliberately failed deployment rolls back successfully
